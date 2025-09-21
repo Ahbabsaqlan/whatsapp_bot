@@ -1,0 +1,19 @@
+2025/09/22-03:01:25.128 9f6a Reusing MANIFEST /Users/jihan/Adlm/whatsapp_automation_profile/Default/IndexedDB/https_web.whatsapp.com_0.indexeddb.leveldb/MANIFEST-000001
+2025/09/22-03:01:25.128 9f6a Recovering log #229
+2025/09/22-03:01:25.133 9f6a Reusing old log /Users/jihan/Adlm/whatsapp_automation_profile/Default/IndexedDB/https_web.whatsapp.com_0.indexeddb.leveldb/000229.log 
+2025/09/22-03:01:26.730 9f68 Level-0 table #237: started
+2025/09/22-03:01:26.738 9f68 Level-0 table #237: 314745 bytes OK
+2025/09/22-03:01:26.741 9f68 Delete type=0 #229
+2025/09/22-03:01:26.742 9f68 Manual compaction at level-0 from '\x001\x00\x00\x00' @ 72057594037927935 : 1 .. '\x002\x00\x00\x00' @ 0 : 0; will stop at (end)
+2025/09/22-03:01:27.485 9f74 Compacting 1@1 + 4@2 files
+2025/09/22-03:01:27.518 9f74 Generated table #238@1: 61870 keys, 2224737 bytes
+2025/09/22-03:01:27.546 9f74 Generated table #239@1: 27373 keys, 2179528 bytes
+2025/09/22-03:01:27.571 9f74 Generated table #240@1: 24065 keys, 2207285 bytes
+2025/09/22-03:01:27.595 9f74 Generated table #241@1: 64671 keys, 1527922 bytes
+2025/09/22-03:01:27.595 9f74 Compacted 1@1 + 4@2 files => 8139472 bytes
+2025/09/22-03:01:27.597 9f74 compacted to: files[ 0 0 4 0 0 0 0 ]
+2025/09/22-03:01:27.597 9f74 Delete type=2 #237
+2025/09/22-03:01:27.597 9f74 Delete type=2 #234
+2025/09/22-03:01:27.597 9f74 Delete type=2 #231
+2025/09/22-03:01:27.597 9f74 Delete type=2 #233
+2025/09/22-03:01:27.597 9f74 Delete type=2 #232

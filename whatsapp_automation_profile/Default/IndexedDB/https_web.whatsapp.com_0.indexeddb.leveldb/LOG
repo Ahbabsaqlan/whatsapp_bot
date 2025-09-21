@@ -1,0 +1,4 @@
+2025/09/22-03:03:18.845 a76c Reusing MANIFEST /Users/jihan/Adlm/whatsapp_automation_profile/Default/IndexedDB/https_web.whatsapp.com_0.indexeddb.leveldb/MANIFEST-000001
+2025/09/22-03:03:18.845 a76c Recovering log #236
+2025/09/22-03:03:18.851 a76c Reusing old log /Users/jihan/Adlm/whatsapp_automation_profile/Default/IndexedDB/https_web.whatsapp.com_0.indexeddb.leveldb/000236.log 
+2025/09/22-03:03:20.375 a779 Manual compaction at level-0 from '\x002\x00\x00\x00' @ 72057594037927935 : 1 .. '\x003\x00\x00\x00' @ 0 : 0; will stop at (end)
