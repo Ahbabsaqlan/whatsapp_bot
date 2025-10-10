@@ -5,6 +5,7 @@ import subprocess
 import json
 import time
 import re
+import platform
 
 # Auto-install missing libraries
 required_libs = [
@@ -125,9 +126,13 @@ def open_chat(driver, contact_name, processed_numbers, retries=3):
             search_box = WebDriverWait(driver, 10).until(
                 EC.presence_of_element_located((By.XPATH, "//div[@contenteditable='true'][@data-tab='3']"))
             )
+            os_name = platform.system()
             search_box.click()
             time.sleep(0.5)
-            search_box.send_keys(Keys.COMMAND + "a")
+            if os_name == "Windows":
+                search_box.send_keys(Keys.CONTROL + "a")
+            else:
+                search_box.send_keys(Keys.COMMAND + "a")
             search_box.send_keys(Keys.BACKSPACE)
             time.sleep(0.5)
             search_box.send_keys(contact_name)
