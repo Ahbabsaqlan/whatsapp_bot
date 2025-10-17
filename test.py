@@ -83,7 +83,7 @@ def get_all_contacts(driver):
     while consecutive_no_change < 3:
         try:
             chat_title_elements = driver.find_elements(
-                By.XPATH, "//div[@id='pane-side']//div[@role='gridcell']//span[@title]"
+                By.XPATH, "//div[@id='pane-side']//div[@role='gridcell']//span[@dir='auto']"
             )
             for el in chat_title_elements:
                 try:
