@@ -6,8 +6,6 @@ import json
 import time
 import re
 import platform
-
-# --- Import custom and third-party libraries ---
 import database_manager as db
 
 # Auto-install missing libraries
@@ -15,14 +13,24 @@ required_libs = [
     "selenium",
     "webdriver-manager",
     "tqdm",
-    "google-generativeai" # Gemini API library
+    "google-generativeai",
+    "Flask"
 ]
 
 def install_missing_libs():
+    try:
+        # --- NEW: Update pip to the latest version ---
+        print("Checking/Updating pip...")
+        subprocess.check_call([sys.executable, "-m", "pip", "install", "--upgrade", "pip"])
+    except Exception as e:
+        print(f"⚠️ Could not update pip: {e}. Continuing with current version.")
+
     for lib in required_libs:
         try:
             if lib == "google-generativeai":
                 __import__("google.generativeai")
+            elif lib == "Flask":
+                __import__("flask")
             else:
                 __import__(lib.replace("-", "_"))
         except ImportError:
@@ -48,8 +56,6 @@ import google.generativeai as genai
 # --- CONFIGURATION SECTION ---
 # ==============================================================================
 
-# Set your name as it appears in WhatsApp
-# This is CRUCIAL for the database to correctly identify your messages as 'me' vs 'user'.
 YOUR_WHATSAPP_NAME = "AHBAB SAKALAN"  # <--- IMPORTANT: CHANGE THIS TO YOUR NAME
 
 # --- Gemini API Configuration ---
@@ -165,21 +171,57 @@ def get_element(driver, key, timeout=10, find_all=False, wait_condition=EC.prese
         return [] if find_all else None
 
 def open_whatsapp():
+    """
+    Opens WhatsApp Web with a robust, cache-first ChromeDriver setup.
+    """
     session_dir = ensure_session_dir()
     options = Options()
     options.add_argument(f"--user-data-dir={os.path.abspath(session_dir)}")
     options.add_argument("--profile-directory=Default")
     options.add_argument("--start-maximized")
-    driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=options)
+
+    driver_path = None
+    try:
+        # Try to install/update the driver as usual
+        print("🌐 Checking for latest ChromeDriver...")
+        driver_path = ChromeDriverManager().install()
+        service = Service(driver_path)
+    except Exception as e:
+        print(f"⚠️ Could not connect to download ChromeDriver: {e}")
+        print("... Attempting to find and use a cached version of ChromeDriver.")
+        
+        # Manually find the latest cached driver
+        cache_dir = os.path.join(os.path.expanduser("~"), ".wdm", "drivers", "chromedriver")
+        if os.path.exists(cache_dir):
+            # List all version directories in the cache
+            version_dirs = [d for d in os.listdir(cache_dir) if os.path.isdir(os.path.join(cache_dir, d))]
+            if version_dirs:
+                # Sort them to find the latest version
+                latest_version = sorted(version_dirs, reverse=True)[0]
+                # Construct the path to the chromedriver executable
+                # Path varies by OS (e.g., chromedriver.exe on Windows)
+                exe_name = "chromedriver.exe" if platform.system() == "Windows" else "chromedriver"
+                # The actual executable is in a nested directory
+                for root, dirs, files in os.walk(os.path.join(cache_dir, latest_version)):
+                    if exe_name in files:
+                        driver_path = os.path.join(root, exe_name)
+                        break
+        
+        if driver_path and os.path.exists(driver_path):
+            print(f"Found cached driver at: {driver_path}")
+            service = Service(driver_path)
+        else:
+            print("❌ No cached driver found. Please connect to the internet to run the script for the first time.")
+            sys.exit(1)
+            
+    driver = webdriver.Chrome(service=service, options=options)
+    
     driver.get("https://web.whatsapp.com")
     print("📱 Please scan the QR code if not already logged in...")
-    login_element = get_element(driver, "login_check", timeout=60, context_message="Wait for main chat page to load.")
-    if not login_element:
-        print("❌ Login timed out. Exiting.")
-        driver.quit()
-        sys.exit(1)
-    print("✅ Login successful.")
-    return driver
+    if not get_element(driver, "login_check", timeout=60, context_message="Wait for main chat page to load."):
+        print("❌ Login timed out. Exiting."); driver.quit(); sys.exit(1)
+    
+    print("✅ Login successful."); return driver
 
 def ensure_session_dir():
     session_dir = "whatsapp_automation_profile"
@@ -207,7 +249,8 @@ def get_all_contacts(driver):
 def sanitize_contact_name(name):
     return re.sub(r'[^\u0000-\uFFFF]', '', name) if name else ""
 
-def open_chat(driver, contact_name, processed_numbers, retries=3):
+def open_chat(driver, contact_name, processed_items, retries=3):
+    """Modified to not require a phone number and to check a combined processed set."""
     for attempt in range(retries):
         search_box = get_element(driver, "search_box", context_message="Find main chat search box.")
         if not search_box: return None, None
@@ -218,52 +261,116 @@ def open_chat(driver, contact_name, processed_numbers, retries=3):
         search_box.send_keys(contact_name); time.sleep(2)
         chat_results = get_element(driver, "search_result_contact_template", find_all=True, format_args=[contact_name], context_message=f"Find '{contact_name}' in search results.")
         if not chat_results:
-            print(f"⚠️ Attempt {attempt+1}: No results for '{contact_name}'. Retrying...")
-            time.sleep(2)
-            continue
+            print(f"⚠️ Attempt {attempt+1}: No results for '{contact_name}'. Retrying..."); time.sleep(2); continue
+        
         for result_index in range(len(chat_results)):
             current_result_list = get_element(driver, "search_result_contact_template", find_all=True, format_args=[contact_name])
             if not current_result_list or len(current_result_list) <= result_index: continue
             current_result_list[result_index].click(); time.sleep(1)
+            
             actual_contact_name, phone_number = get_details_from_header(driver)
-            if not phone_number:
-                print(f"⚠️ Could not determine a valid phone number for '{actual_contact_name}'. Skipping this search result.")
+            if not actual_contact_name:
+                print("⚠️ Could not get contact name from header. Skipping search result.")
                 continue
-            if phone_number in processed_numbers: continue
+
+            # Use phone number as unique ID if it exists, otherwise use the title.
+            unique_id = phone_number if phone_number else actual_contact_name
+            if unique_id in processed_items: continue
+            
             return actual_contact_name, phone_number
     return None, None
 
 def get_details_from_header(driver):
-    """Helper function to get name and number from the header of an OPEN chat."""
-    phone_number, actual_contact_name = "", ""
+    """
+    Helper function to get name and number from the header of an OPEN chat.
+    It will return (name, None) for groups or when a number isn't found.
+    """
+    phone_number, actual_contact_name = None, None
     contact_header = get_element(driver, "chat_header_name", context_message="Read contact's name from header.")
     if not contact_header: return None, None
+    
     actual_contact_name = contact_header.text
     contact_header.click(); time.sleep(1)
+    
     phone_element = get_element(driver, "contact_info_phone_number", timeout=5, context_message=f"Find phone number for '{actual_contact_name}'.")
     if phone_element:
         phone_number = phone_element.text
     elif re.match(r'^\+[\d\s()-]+$', actual_contact_name.strip()):
         phone_number = actual_contact_name.strip()
+    
     body_element = get_element(driver, "body_tag_name")
     if body_element: body_element.send_keys(Keys.ESCAPE); time.sleep(1)
+    
     return actual_contact_name, phone_number
 
-def scroll_chat(driver):
-    chat_container = get_element(driver, "chat_container", timeout=30)
-    if not chat_container: return
-    last_height, consecutive_no_change = -1, 0
-    while consecutive_no_change < 2:
+def smart_scroll_and_collect(driver, stop_at_last=None):
+    """
+    Scrolls up the chat pane page by page, collecting messages as it goes.
+    Stops scrolling as soon as the 'stop_at_last' message's meta_text is found.
+    This is far more efficient than scrolling all the way to the top first.
+    """
+    chat_container = get_element(driver, "chat_container", timeout=10)
+    if not chat_container:
+        print("❌ Could not find chat container to scroll and collect messages.")
+        return []
+
+    all_messages_data = []
+    seen_meta_texts = set()
+    found_stop_point = False
+
+    # Limit the number of scrolls to prevent infinite loops in very long chats
+    max_scrolls = 50 
+    scroll_count = 0
+
+    while not found_stop_point and scroll_count < max_scrolls:
+        # Get all messages currently visible in the DOM
+        current_visible_messages = get_element(driver, "all_messages", find_all=True, suppress_error=True)
+        
+        if not current_visible_messages:
+            break # No messages in this chat at all
+
+        new_messages_found_this_scroll = False
+        # Iterate backwards through the messages on screen (from bottom to top)
+        for msg_element in reversed(current_visible_messages):
+            parsed = parse_message(msg_element)
+            if parsed:
+                # If we've already processed this message in a previous scroll-up, skip it
+                if parsed['meta_text'] in seen_meta_texts:
+                    continue
+                
+                new_messages_found_this_scroll = True
+                all_messages_data.append(parsed)
+                seen_meta_texts.add(parsed['meta_text'])
+
+                # THE CRUCIAL EFFICIENCY CHECK:
+                # If we find the message we're looking for, we can stop everything.
+                if stop_at_last and parsed['meta_text'] == stop_at_last:
+                    print(f"⏹️ Reached previously stored last message. Stopping scroll and collection.")
+                    found_stop_point = True
+                    # Remove the matched message itself, as we only want newer ones
+                    all_messages_data.pop() 
+                    break # Exit the 'for' loop for this scroll
+
+        if found_stop_point:
+            break # Exit the 'while' loop for scrolling
+
+        # If we scanned the whole screen and found no new messages, it means we've reached the top
+        if not new_messages_found_this_scroll:
+            print("Reached top of chat or found no new messages on this scroll.")
+            break
+            
+        # Scroll up by one "page" to load older messages
         driver.execute_script("arguments[0].scrollTop = 0;", chat_container)
-        time.sleep(3)
-        new_height = driver.execute_script("return arguments[0].scrollHeight", chat_container)
-        if new_height == last_height:
-            try:
-                driver.find_element(By.XPATH, SELECTORS["load_older_messages_button"]).click()
-                consecutive_no_change = 0; time.sleep(4)
-            except (NoSuchElementException, StaleElementReferenceException): consecutive_no_change += 1
-        else:
-            consecutive_no_change, last_height = 0, new_height
+        print("   ...scrolling up for older messages...")
+        time.sleep(2) # Wait for new messages to load into the DOM
+        scroll_count += 1
+
+    if scroll_count >= max_scrolls:
+        print(f"⚠️ Reached maximum scroll limit of {max_scrolls}. Proceeding with collected messages.")
+
+    # The collected messages are in reverse chronological order (newest to oldest),
+    # so we reverse them back to get the correct chronological order for saving.
+    return all_messages_data[::-1]
 
 
 def parse_message(msg):
@@ -349,53 +456,56 @@ def monitor_and_reply_to_unread(driver):
         while True:
             print("\n L  Checking for unread messages...")
             unread_button = get_element(driver, "unread_filter_button", wait_condition=EC.element_to_be_clickable, timeout=5)
-            if not unread_button: print("✔️ No 'Unread' filter button. Waiting..."); time.sleep(15); continue
+            if not unread_button: 
+                print("✔️ No 'Unread' filter button found. Assuming no unread messages. Waiting..."); time.sleep(15); continue
             
             unread_button.click(); print(" L  'Unread' filter activated."); time.sleep(2)
             
-            unread_chats_snapshot = get_element(driver, "chat_list_titles", find_all=True, suppress_error=True, timeout=3)
-            if not unread_chats_snapshot:
-                print("✔️ No unread chats found. Deactivating filter and waiting...")
-                try: get_element(driver, "unread_filter_button", timeout=2).click()
+            unread_contacts_snapshot = get_all_contacts(driver)
+            
+            if not unread_contacts_snapshot:
+                print("✔️ No unread chats found in the filtered view. Deactivating filter and waiting...")
+                try: get_element(driver, "unread_filter_button", timeout=2).click() # Deactivate filter
                 except: pass
                 time.sleep(15); continue
             
-            print(f"📩 Found {len(unread_chats_snapshot)} unread chat(s) in this batch. Processing now...")
+            print(f"📩 Found {len(unread_contacts_snapshot)} unread chat(s) in this batch. Processing now...")
 
-            for chat_element in unread_chats_snapshot:
-                try:
-                    contact_name = sanitize_contact_name(chat_element.get_attribute("title"))
-                    if not contact_name: continue
-                    print(f"\n--- Processing '{contact_name}' ---")
-                    chat_element.click(); time.sleep(1)
-                except Exception as e:
-                    print(f"⚠️ Could not click on chat for '{contact_name}'. Skipping. Error: {e}"); continue
-                
-                name, number = get_details_from_header(driver)
-                if not all([name, number]):
-                    print(f"Skipping '{contact_name}' as details could not be retrieved."); continue
+            processed_in_batch = set()
 
-                # --- NEW LOGIC TO FETCH ONLY NEW MESSAGES ---
-                # 1. Ask the DB for the last message we have for this contact
-                last_msg = db.get_last_message_from_db(number, YOUR_WHATSAPP_NAME)
+            for contact_name in unread_contacts_snapshot:
+                if contact_name in processed_in_batch:
+                    continue
+
+                print(f"\n--- Processing '{contact_name}' ---")
                 
-                scroll_chat(driver)
+                # Use the robust open_chat to find and open the chat by name
+                name, number = open_chat(driver, contact_name, processed_in_batch)
                 
-                # 2. Pass that last message to the collector, which will stop when it sees it
-                new_data = collect_messages(driver, stop_at_last=last_msg)
-                # --- END OF NEW LOGIC ---
+                if not name:
+                    print(f"Skipping '{contact_name}' as it could not be opened or was already processed."); continue
+
+                processed_in_batch.add(number if number else name)
+
+                last_msg = db.get_last_message_from_db(number, name, YOUR_WHATSAPP_NAME)
+                new_data = smart_scroll_and_collect(driver, stop_at_last=last_msg)
                 
                 db.save_messages_to_db(name, number, new_data, YOUR_WHATSAPP_NAME)
                 
-                # Only reply if there are actually new messages
-                if USE_GEMINI_REPLIES and new_data:
+                if USE_GEMINI_REPLIES and new_data and number:
                     history = list(db.get_recent_messages_for_prompt(number, count=10))
                     reply_text = generate_gemini_reply(history) if history else "Hello! I've received your first message and will get back to you shortly."
                     send_reply(driver, reply_text)
                 
+                # --- THIS LINE IS NOW CORRECTLY RESTORED ---
                 close_current_chat(driver)
             
-            print("\n✅ Finished processing batch. Waiting before next check..."); time.sleep(10)
+            print("\n✅ Finished processing batch. Deactivating filter to reset view.")
+            try: get_element(driver, "unread_filter_button", timeout=2).click()
+            except: pass
+            
+            print("...Waiting before next check...")
+            time.sleep(10)
 
     except KeyboardInterrupt: print("\n🛑 Monitoring stopped.")
 
@@ -406,18 +516,18 @@ def run_full_update(driver):
     processed_this_session = set()
     for contact_name in tqdm(contacts_to_process, desc="📂 Processing contacts", unit="contact"):
         name, number = open_chat(driver, contact_name, processed_this_session)
-        if not all([name, number]):
-            print(f"Skipping '{contact_name}'."); close_current_chat(driver); continue
         
-        final_name, final_number = (number, name) if re.match(r'^\+[\d\s-]+$', name) else (name, number)
-        processed_this_session.add(final_number)
+        # --- MODIFIED: Only require name to proceed ---
+        if not name:
+            print(f"Skipping '{contact_name}' as it could not be opened."); close_current_chat(driver); continue
         
-        # We now pass YOUR_WHATSAPP_NAME to this function call as well for consistency
-        last_msg = db.get_last_message_from_db(final_number, YOUR_WHATSAPP_NAME)
+        unique_id = number if number else name
+        processed_this_session.add(unique_id)
         
-        scroll_chat(driver)
-        new_data = collect_messages(driver, stop_at_last=last_msg)
-        db.save_messages_to_db(final_name, final_number, new_data, YOUR_WHATSAPP_NAME)
+        last_msg = db.get_last_message_from_db(number, name, YOUR_WHATSAPP_NAME)
+        new_data = smart_scroll_and_collect(driver, stop_at_last=last_msg)
+        
+        db.save_messages_to_db(name, number, new_data, YOUR_WHATSAPP_NAME)
         close_current_chat(driver)
     print("\n🎉 Full update complete!")
 
