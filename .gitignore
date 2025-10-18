@@ -1,5 +1,5 @@
 whatsapp_automation_profile/
-*.json
+whatsapp_chats.json
 .DS_Store
 bot.py
 test2.py

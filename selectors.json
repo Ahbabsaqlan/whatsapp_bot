@@ -1,0 +1,26 @@
+{
+  "login_check": "//div[@contenteditable='true'][@data-tab='3']",
+  "chat_list_pane_id": "pane-side",
+  "chat_list_titles": "//div[@id='pane-side']//div[@role='gridcell']//span[@dir='auto']",
+  "search_box": "//div[@contenteditable='true'][@data-tab='3']",
+  "search_result_contact_template": "//div[@id='pane-side']//span[@title='{}']",
+  "chat_header_name": "div#main header div[role='button'][tabindex='0'] span[dir='auto']",
+  "contact_info_phone_number": "header:has(div[title='Contact info']) + div span.selectable-text.copyable-text[dir='auto'] div",
+  "body_tag_name": "body",
+  "chat_container": "div#main div.copyable-area div[tabindex='0']",
+  "load_older_messages_button": "//button[.//div[contains(text(), 'Click here to get older messages')]]",
+  "all_messages": "div.message-in, div.message-out",
+  "message_meta_data": "div[data-pre-plain-text]",
+  "message_image": ".//div[@role='button' and @aria-label='Open picture']",
+  "message_voice": ".//button[@aria-label='Play voice message']",
+  "message_document": ".//div[starts-with(@title, 'Download ')]",
+  "message_video_gif": ".//div[@aria-label='Video' or @aria-label='GIF']",
+  "message_sticker": ".//img[contains(@style, 'width') and contains(@style, 'height')]",
+  "message_text_content": "span.selectable-text",
+  "message_forwarded": ".//span[contains(text(), 'Forwarded')]",
+  "reply_message_box": "//div[@contenteditable='true'][@data-tab='10']",
+  "unread_filter_button": "//*[@id='unread-filter']",
+  "chat_menu_button": "//*[@id='main']/header/div[3]/div/div[2]/div/span/div/div",
+  "chat_close_option": "//li[@role='button']//span[text()='Close chat']"
+}
+
