@@ -7,23 +7,31 @@ import time
 import re
 import platform
 
+# --- Import custom and third-party libraries ---
+import database_manager as db
+
 # Auto-install missing libraries
 required_libs = [
     "selenium",
     "webdriver-manager",
-    "tqdm"
+    "tqdm",
+    "google-generativeai" # Gemini API library
 ]
 
 def install_missing_libs():
     for lib in required_libs:
         try:
-            __import__(lib.replace("-", "_"))
+            if lib == "google-generativeai":
+                __import__("google.generativeai")
+            else:
+                __import__(lib.replace("-", "_"))
         except ImportError:
             print(f"📦 Installing missing library: {lib} ...")
             subprocess.check_call([sys.executable, "-m", "pip", "install", lib])
 
 install_missing_libs()
 
+# Now that we've ensured they are installed, we can import them
 from tqdm import tqdm
 from selenium.webdriver.common.keys import Keys
 from selenium import webdriver
@@ -34,347 +42,433 @@ from selenium.common.exceptions import NoSuchElementException, TimeoutException,
 from webdriver_manager.chrome import ChromeDriverManager
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
+import google.generativeai as genai
 
+# ==============================================================================
+# --- CONFIGURATION SECTION ---
+# ==============================================================================
+
+# Set your name as it appears in WhatsApp
+# This is CRUCIAL for the database to correctly identify your messages as 'me' vs 'user'.
+YOUR_WHATSAPP_NAME = "AHBAB SAKALAN"  # <--- IMPORTANT: CHANGE THIS TO YOUR NAME
+
+# --- Gemini API Configuration ---
+USE_GEMINI_REPLIES = True  # Set to False to use the old static reply
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+
+GEMINI_SYSTEM_PROMPT = (
+    "You are AHBAB SAKALAN's personal AI assistant, managing his WhatsApp messages. "
+    "The messages you receive are from various contacts and they might use Banglish word like typed in english alphabet but actually meaning bengali words. "
+    "Your tone should be professional, friendly, and concise. "
+    "Your main goal is to acknowledge the user's message and inform them that AHBAB SAKALAN has received it and will get back to them soon. "
+    "Do not invent information or make promises. "
+    "Analyze the last message from the 'user' to provide a relevant, short acknowledgment. "
+    "For example, if the user asks 'Can we meet tomorrow?', a good reply would be 'Hello! AHBAB SAKALAN has received your message about the meeting and will get back to you shortly.' "
+    "If it's a simple greeting, a simple acknowledgment is fine. "
+    "Keep replies to 1-2 sentences."
+    "Try to use some Banglish words where appropriate based on the user's message."
+    "Always end with a polite closing."
+    "try to understand the context of the message and reply accordingly."
+    "if they ask greetings like how are you or any other, reply accordingly."
+    "CRITICAL: Your entire output must ONLY be the final message to be sent to the user. Do NOT include your reasoning, analysis, drafts, or any other text."
+)
+
+# Safety settings for Gemini
+GEMINI_SAFETY_SETTINGS = [
+    {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_MEDIUM_AND_ABOVE"},
+    {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_MEDIUM_AND_ABOVE"},
+    {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_MEDIUM_AND_ABOVE"},
+    {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_MEDIUM_AND_ABOVE"},
+]
+
+# ==============================================================================
+# --- HELPER & API FUNCTIONS ---
+# ==============================================================================
+
+def load_selectors(filename="selectors.json"):
+    """Loads selectors from a JSON file."""
+    try:
+        with open(filename, 'r', encoding='utf-8') as f:
+            print(f"📄 Loading selectors from '{filename}'...")
+            return json.load(f)
+    except FileNotFoundError:
+        print(f"❌ FATAL ERROR: Selector file '{filename}' not found. Please create it next to the script.")
+        sys.exit(1)
+    except json.JSONDecodeError:
+        print(f"❌ FATAL ERROR: Could not decode JSON from '{filename}'. Please check its format.")
+        sys.exit(1)
+
+SELECTORS = load_selectors()
+
+def generate_gemini_reply(conversation_history):
+    if not GEMINI_API_KEY:
+        print("❌ Gemini API Key not found. Falling back to static reply.")
+        return "I have received your message and will reply soon."
+    try:
+        # --- NEW: Trim trailing 'model' messages to satisfy API requirements ---
+        while conversation_history and conversation_history[-1]['role'] == 'me':
+            conversation_history.pop()
+        
+        if not conversation_history:
+            print("⚠️ Conversation history only contains 'me' messages. Cannot generate reply.")
+            return "Thank you for your message. I'll get back to you."
+
+        genai.configure(api_key=GEMINI_API_KEY)
+        model = genai.GenerativeModel('gemini-2.5-pro', system_instruction=GEMINI_SYSTEM_PROMPT, safety_settings=GEMINI_SAFETY_SETTINGS)
+        prompt_history = [{'role': 'user' if msg['role'] != 'me' else 'model', 'parts': [{'text': msg['content']}]} for msg in conversation_history]
+        
+        print(f"🧠 Asking Gemini 2.5 Pro for a reply based on {len(prompt_history)} messages...")
+        response = model.generate_content(prompt_history)
+        
+        if response.parts:
+            raw_reply = response.text.strip()
+            final_reply = raw_reply.split('\n\n')[-1].strip()
+            print(f"🤖 Cleaned Gemini Suggestion: '{final_reply}'")
+            return final_reply
+        else:
+            print("⚠️ Gemini returned no content. This might be due to a safety filter. Falling back to a static reply.")
+            if response.prompt_feedback: print(f"   - Prompt Feedback: {response.prompt_feedback}")
+            return "Thank you for your message. AHBAB will get back to you shortly."
+    except Exception as e:
+        print(f"❌ An error occurred with the Gemini API: {e}")
+        return "Thank you for your message. I will get back to you shortly."
+
+# ==============================================================================
+# --- SELENIUM & SCRAPING FUNCTIONS ---
+# ==============================================================================
+
+def get_element(driver, key, timeout=10, find_all=False, wait_condition=EC.presence_of_element_located, format_args=None, suppress_error=False, context_message=None):
+    """Safely finds elements, reporting detailed, contextual errors on failure."""
+    try:
+        selector_value = SELECTORS[key]
+        if format_args:
+            selector_value = selector_value.format(*format_args)
+        by = By.XPATH if selector_value.startswith(('//', './', '(')) else By.CSS_SELECTOR
+        wait = WebDriverWait(driver, timeout)
+        locator = (by, selector_value)
+        if find_all:
+            wait_condition = EC.presence_of_all_elements_located if wait_condition == EC.presence_of_element_located else wait_condition
+            return wait.until(wait_condition(locator))
+        else:
+            return wait.until(wait_condition(locator))
+    except TimeoutException:
+        if not suppress_error:
+            print(f"\n- - - - - [ DIAGNOSTIC INFO ] - - - - -")
+            if context_message: print(f"❗ GOAL: {context_message}")
+            else: print("❗ GOAL: A required element could not be found.")
+            print(f"   - FAILED SELECTOR KEY: '{key}'")
+            print(f"   - SELECTOR PATH USED: '{SELECTORS.get(key, 'N/A')}'")
+            print(f"- - - - - - - - - - - - - - - - - - - - -")
+        return [] if find_all else None
+    except StaleElementReferenceException:
+        if not suppress_error: print(f"⚠️ Warning: Element for selector key '{key}' became stale.")
+        return [] if find_all else None
 
 def open_whatsapp():
-    """Open WhatsApp Web with persistent session."""
     session_dir = ensure_session_dir()
-
     options = Options()
     options.add_argument(f"--user-data-dir={os.path.abspath(session_dir)}")
     options.add_argument("--profile-directory=Default")
     options.add_argument("--start-maximized")
-
     driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=options)
     driver.get("https://web.whatsapp.com")
-
     print("📱 Please scan the QR code if not already logged in...")
-
-    try:
-        WebDriverWait(driver, 60).until(
-            EC.presence_of_element_located((By.XPATH, "//div[@contenteditable='true'][@data-tab='3']"))
-        )
-        print("✅ Login successful.")
-    except TimeoutException:
-        print("❌ Login timed out. Please run the script again.")
+    login_element = get_element(driver, "login_check", timeout=60, context_message="Wait for main chat page to load.")
+    if not login_element:
+        print("❌ Login timed out. Exiting.")
         driver.quit()
         sys.exit(1)
-
+    print("✅ Login successful.")
     return driver
 
-
 def ensure_session_dir():
-    """Make sure session/profile directory exists."""
     session_dir = "whatsapp_automation_profile"
-    if not os.path.exists(session_dir):
-        os.makedirs(session_dir)
-        print("📂 Created session directory for WhatsApp Web.")
+    if not os.path.exists(session_dir): os.makedirs(session_dir)
     return session_dir
 
-
 def get_all_contacts(driver):
-    chat_list_selector = (By.ID, "pane-side")
-    chat_list = WebDriverWait(driver, 20).until(
-        EC.presence_of_element_located(chat_list_selector)
-    )
-    contacts_set = set()
-    last_height, consecutive_no_change = -1, 0
-
+    try: chat_list = driver.find_element(By.ID, SELECTORS["chat_list_pane_id"])
+    except NoSuchElementException: return []
+    contacts_set, last_height, consecutive_no_change = set(), -1, 0
     while consecutive_no_change < 3:
-        try:
-            chat_title_elements = driver.find_elements(
-                By.XPATH, "//div[@id='pane-side']//div[@role='gridcell']//span[@dir='auto']"
-            )
-            for el in chat_title_elements:
-                try:
-                    name = sanitize_contact_name(el.get_attribute("title"))
-                    if name:
-                        contacts_set.add(name.strip())
-                except StaleElementReferenceException:
-                    continue
-        except Exception as e:
-            print(f"⚠️ Error while fetching contacts: {e}")
-
+        for el in get_element(driver, "chat_list_titles", timeout=2, find_all=True):
+            try:
+                name = sanitize_contact_name(el.get_attribute("title"))
+                if name: contacts_set.add(name.strip())
+            except StaleElementReferenceException: continue
         driver.execute_script("arguments[0].scrollTop += 300;", chat_list)
         time.sleep(1)
         new_height = driver.execute_script("return arguments[0].scrollTop", chat_list)
-        max_height = driver.execute_script("return arguments[0].scrollHeight", chat_list)
-
-        if new_height == last_height:
-            consecutive_no_change += 1
-        else:
-            consecutive_no_change = 0
-            last_height = new_height
-
-        if new_height >= max_height:
-            break
-
+        if new_height == last_height: consecutive_no_change += 1
+        else: consecutive_no_change, last_height = 0, new_height
+        if new_height >= driver.execute_script("return arguments[0].scrollHeight", chat_list): break
     return list(contacts_set)
 
-
 def sanitize_contact_name(name):
-    return re.sub(r'[^\u0000-\uFFFF]', '', name)
-
+    return re.sub(r'[^\u0000-\uFFFF]', '', name) if name else ""
 
 def open_chat(driver, contact_name, processed_numbers, retries=3):
-    """
-    Searches for a contact, handles multiple results, and fetches the phone number.
-    Returns (name, "") for saved contacts where the number can't be found.
-    """
     for attempt in range(retries):
-        try:
-            search_box = WebDriverWait(driver, 10).until(
-                EC.presence_of_element_located((By.XPATH, "//div[@contenteditable='true'][@data-tab='3']"))
-            )
-            os_name = platform.system()
-            search_box.click()
-            time.sleep(0.5)
-            if os_name == "Windows":
-                search_box.send_keys(Keys.CONTROL + "a")
-            else:
-                search_box.send_keys(Keys.COMMAND + "a")
-            search_box.send_keys(Keys.BACKSPACE)
-            time.sleep(0.5)
-            search_box.send_keys(contact_name)
+        search_box = get_element(driver, "search_box", context_message="Find main chat search box.")
+        if not search_box: return None, None
+        os_name = platform.system()
+        search_box.click(); time.sleep(0.5)
+        search_box.send_keys(Keys.COMMAND + "a" if os_name != "Windows" else Keys.CONTROL + "a")
+        search_box.send_keys(Keys.BACKSPACE); time.sleep(0.5)
+        search_box.send_keys(contact_name); time.sleep(2)
+        chat_results = get_element(driver, "search_result_contact_template", find_all=True, format_args=[contact_name], context_message=f"Find '{contact_name}' in search results.")
+        if not chat_results:
+            print(f"⚠️ Attempt {attempt+1}: No results for '{contact_name}'. Retrying...")
             time.sleep(2)
-
-            search_results_xpath = f"//div[@id='pane-side']//span[@title='{contact_name}']"
-            WebDriverWait(driver, 5).until(
-                EC.presence_of_element_located((By.XPATH, search_results_xpath))
-            )
-            chat_results = driver.find_elements(By.XPATH, search_results_xpath)
-            print(chat_results)
-
-            for result_index in range(len(chat_results)):
-                current_result = driver.find_elements(By.XPATH, search_results_xpath)[result_index]
-                current_result.click()
-                time.sleep(1)
-
-                phone_number = ""
-                actual_contact_name = ""
-                
-                try:
-                    contact_header_selector = "div#main header div[role='button'][tabindex='0'] span[dir='auto']"
-                    contact_header = WebDriverWait(driver, 10).until(
-                        EC.visibility_of_element_located((By.CSS_SELECTOR, contact_header_selector))
-                    )
-                    actual_contact_name = contact_header.text
-
-                    contact_header.click()
-                    time.sleep(1)
-                    phone_number_selector = "header:has(div[title='Contact info']) + div span.selectable-text.copyable-text[dir='auto'] div"
-                    phone_element = WebDriverWait(driver, 5).until(
-                        EC.presence_of_element_located((By.CSS_SELECTOR, phone_number_selector))
-                    )
-                    phone_number = phone_element.text
-                    
-                except (TimeoutException, NoSuchElementException):
-                    print(f"⚠️ Could not find a phone number for '{actual_contact_name}'. Proceeding without it.")
-                    phone_number = ""
-                
-                finally:
-                    try:
-                        driver.find_element(By.TAG_NAME, 'body').send_keys(Keys.ESCAPE)
-                        time.sleep(1)
-                    except: pass
-                
-                # --- DUPLICATE CHECKING LOGIC ---
-                unique_id = phone_number if phone_number else actual_contact_name
-                if unique_id in processed_numbers:
-                    print(f"⏭️ Skipping '{actual_contact_name}' as it's already processed.")
-                    continue
-                else:
-                    print(f"✅ Found new contact '{actual_contact_name}'.")
-                    return actual_contact_name, phone_number
-
-            return None, None
-
-        except TimeoutException:
-            print(f"⚠️ Attempt {attempt+1}: No results found for '{contact_name}'. Retrying...")
-            time.sleep(2)
-
-    print(f"❌ Could not open a new chat for '{contact_name}' after {retries} attempts. Skipping...")
+            continue
+        for result_index in range(len(chat_results)):
+            current_result_list = get_element(driver, "search_result_contact_template", find_all=True, format_args=[contact_name])
+            if not current_result_list or len(current_result_list) <= result_index: continue
+            current_result_list[result_index].click(); time.sleep(1)
+            actual_contact_name, phone_number = get_details_from_header(driver)
+            if not phone_number:
+                print(f"⚠️ Could not determine a valid phone number for '{actual_contact_name}'. Skipping this search result.")
+                continue
+            if phone_number in processed_numbers: continue
+            return actual_contact_name, phone_number
     return None, None
 
+def get_details_from_header(driver):
+    """Helper function to get name and number from the header of an OPEN chat."""
+    phone_number, actual_contact_name = "", ""
+    contact_header = get_element(driver, "chat_header_name", context_message="Read contact's name from header.")
+    if not contact_header: return None, None
+    actual_contact_name = contact_header.text
+    contact_header.click(); time.sleep(1)
+    phone_element = get_element(driver, "contact_info_phone_number", timeout=5, context_message=f"Find phone number for '{actual_contact_name}'.")
+    if phone_element:
+        phone_number = phone_element.text
+    elif re.match(r'^\+[\d\s()-]+$', actual_contact_name.strip()):
+        phone_number = actual_contact_name.strip()
+    body_element = get_element(driver, "body_tag_name")
+    if body_element: body_element.send_keys(Keys.ESCAPE); time.sleep(1)
+    return actual_contact_name, phone_number
 
 def scroll_chat(driver):
-    chat_pane_selector = (By.CSS_SELECTOR, "div#main div.copyable-area div[tabindex='0']")
-    try:
-        chat_container = WebDriverWait(driver, 30).until(
-            EC.presence_of_element_located(chat_pane_selector)
-        )
-    except TimeoutException:
-        print("❌ Could not find the chat message container.")
-        return
-
-    last_height = -1
-    consecutive_no_change = 0
+    chat_container = get_element(driver, "chat_container", timeout=30)
+    if not chat_container: return
+    last_height, consecutive_no_change = -1, 0
     while consecutive_no_change < 2:
         driver.execute_script("arguments[0].scrollTop = 0;", chat_container)
         time.sleep(3)
         new_height = driver.execute_script("return arguments[0].scrollHeight", chat_container)
-
         if new_height == last_height:
-            button_was_clicked = False
             try:
-                load_more_button_xpath = "//button[.//div[contains(text(), 'Click here to get older messages')]]"
-                button = driver.find_element(By.XPATH, load_more_button_xpath)
-                print("\n🖱️ 'Load older messages' button found. Clicking it...")
-                button.click()
-                button_was_clicked = True
-                time.sleep(4)
-            except (NoSuchElementException, StaleElementReferenceException):
-                pass
-            if button_was_clicked:
-                consecutive_no_change = 0
-            else:
-                consecutive_no_change += 1
+                driver.find_element(By.XPATH, SELECTORS["load_older_messages_button"]).click()
+                consecutive_no_change = 0; time.sleep(4)
+            except (NoSuchElementException, StaleElementReferenceException): consecutive_no_change += 1
         else:
-            consecutive_no_change = 0
-            last_height = new_height
-
-
-def collect_messages(driver, stop_at_last=None):
-    messages = driver.find_elements(By.CSS_SELECTOR, "div.message-in, div.message-out")
-    data = []
-    for msg in reversed(messages):
-        parsed = parse_message(msg)
-        if parsed:
-            if stop_at_last and parsed == stop_at_last:
-                print("⏹️ Reached previously stored last message. Stopping collection.")
-                break
-            data.append(parsed)
-    return data[::-1]
+            consecutive_no_change, last_height = 0, new_height
 
 
 def parse_message(msg):
     try:
-        meta_div = msg.find_element(By.CSS_SELECTOR, "div[data-pre-plain-text]")
+        meta_div = msg.find_element(By.CSS_SELECTOR, SELECTORS["message_meta_data"])
+        # --- MODIFIED: We capture the raw meta_text ---
         meta_text = meta_div.get_attribute("data-pre-plain-text")
+        
         match = re.match(r"\[(.*?), (.*?)\] (.*?):", meta_text)
         if not match: return None
         time_str, date_str, sender = match.groups()
-        msg_type, content = "text", ""
-        try: msg.find_element(By.XPATH, ".//div[@role='button' and @aria-label='Open picture']"); msg_type, content = "image", "📎 Image"
-        except NoSuchElementException: pass
-        try: msg.find_element(By.XPATH, ".//button[@aria-label='Play voice message']"); msg_type, content = "voice", "📎 Voice Message"
-        except NoSuchElementException: pass
-        try: msg.find_element(By.XPATH, ".//div[starts-with(@title, 'Download ')]"); msg_type, content = "document", "📎 Document"
-        except NoSuchElementException: pass
-        try: msg.find_element(By.XPATH, ".//div[@aria-label='Video' or @aria-label='GIF']"); msg_type, content = "video", "📎 Video/GIF"
-        except NoSuchElementException: pass
+        content = "📎 Media (Image/Video/Doc)"
         try:
-            if msg.find_element(By.XPATH, ".//img[contains(@style, 'width') and contains(@style, 'height')]"): msg_type, content = "sticker", "📎 Sticker"
-        except NoSuchElementException: pass
-        try:
-            text_element = msg.find_element(By.CSS_SELECTOR, "span.selectable-text")
+            text_element = msg.find_element(By.CSS_SELECTOR, SELECTORS["message_text_content"])
             text = text_element.text.strip()
-            if text: content = text if msg_type == "text" else f"{content} {text}"
+            if text: content = text
         except NoSuchElementException: pass
-        if not content:
-            try: msg.find_element(By.XPATH, ".//span[contains(text(), 'Forwarded')]"); msg_type, content = "forwarded", "📎 Forwarded Content"
-            except NoSuchElementException: msg_type, content = "unknown", ""
-        return {"date": date_str.strip(), "time": time_str.strip(), "sender": sender.strip(), "type": msg_type, "content": content.strip()}
+            
+        # --- MODIFIED: We return the meta_text along with other data ---
+        return {"date": date_str.strip(), "time": time_str.strip(), "sender": sender.strip(), "content": content.strip(), "meta_text": meta_text}
     except (NoSuchElementException, StaleElementReferenceException): return None
 
+def collect_messages(driver, stop_at_last=None):
+    messages = get_element(driver, "all_messages", find_all=True, suppress_error=True)
+    data = []
+    for msg in reversed(messages):
+        parsed = parse_message(msg)
+        if parsed:
+            # --- MODIFIED: The comparison is now a foolproof string match ---
+            if stop_at_last and parsed['meta_text'] == stop_at_last:
+                print(f"⏹️ Reached previously stored last message. Stopping collection.")
+                break
+            data.append(parsed)
+    return data[::-1]
 
-def save_chat_to_json(contact_name, phone_number, new_messages, output_file="whatsapp_chats.json"):
-    """
-    Saves new messages to a JSON file which is a list of contact objects.
-    Finds contacts by phone number to update them, or adds a new contact object if not found.
-    """
-    all_chats_list = []
-    if os.path.exists(output_file):
-        try:
-            with open(output_file, "r", encoding="utf-8") as f:
-                all_chats_list = json.load(f)
-        except json.JSONDecodeError:
-            print(f"⚠️ Warning: Could not decode existing JSON file. Starting with a new list.")
-
-    if not new_messages:
-        print(f"✔️ No new messages to save for '{contact_name}'")
+def send_reply(driver, reply_text):
+    message_box = get_element(driver, "reply_message_box")
+    if not message_box:
+        print("❌ Could not find message box to send reply.")
         return
+    message_box.click()
+    message_box.send_keys(reply_text)
+    message_box.send_keys(Keys.ENTER)
+    print(f"💬 Replied to chat.")
+    time.sleep(1)
 
-    # Find the existing contact in the list, if it exists
-    existing_contact_obj = None
-    for contact in all_chats_list:
-        if contact.get("contact_number") == phone_number:
-            existing_contact_obj = contact
-            break
-    
-    if existing_contact_obj:
-        # Contact exists, append new messages
-        existing_contact_obj["conversations"].extend(new_messages)
-        # Update name in case it has changed
-        existing_contact_obj["contact_name"] = contact_name
-        print(f"💾 Appended {len(new_messages)} new messages for '{contact_name}' ({phone_number})")
-    else:
-        # New contact, create a new object and add it to the list
-        new_contact = {
-            "contact_name": contact_name,
-            "contact_number": phone_number,
-            "conversations": new_messages
-        }
-        all_chats_list.append(new_contact)
-        print(f"💾 Saved {len(new_messages)} messages for new contact '{contact_name}' ({phone_number})")
+def close_current_chat(driver):
+    """
+    Closes the current chat using the explicit Menu -> Close chat action.
+    """
+    try:
+        # Step 1: Find and click the three-dots Menu button in the chat header
+        menu_button = get_element(driver, "chat_menu_button", timeout=5, context_message="Find chat menu (three dots).")
+        if not menu_button:
+            print("⚠️ Could not find chat menu button to close chat.")
+            return
 
-    # Save the entire updated list back to the file
-    with open(output_file, "w", encoding="utf-8") as f:
-        json.dump(all_chats_list, f, ensure_ascii=False, indent=2)
+        menu_button.click()
+        time.sleep(0.5) # Wait for the dropdown to appear
 
+        # Step 2: Find and click the "Close chat" option in the menu
+        close_option = get_element(driver, "chat_close_option", wait_condition=EC.element_to_be_clickable, context_message="Find 'Close chat' option in menu.")
+        if not close_option:
+            print("⚠️ Could not find 'Close chat' option in the menu.")
+            # Press escape to close the menu as a fallback
+            driver.find_element(By.TAG_NAME, 'body').send_keys(Keys.ESCAPE)
+            return
+            
+        close_option.click()
+        print("✅ Chat closed successfully via menu.")
+        time.sleep(1) # Allow UI to update
+
+    except Exception as e:
+        print(f"❌ An error occurred while trying to close the chat: {e}")
+
+# ==============================================================================
+# --- MAIN WORKFLOW FUNCTIONS ---
+# ==============================================================================
+
+def monitor_and_reply_to_unread(driver):
+    print("\n--- Starting Unread Message Monitor (Press Ctrl+C to stop) ---")
+    try:
+        while True:
+            print("\n L  Checking for unread messages...")
+            unread_button = get_element(driver, "unread_filter_button", wait_condition=EC.element_to_be_clickable, timeout=5)
+            if not unread_button: print("✔️ No 'Unread' filter button. Waiting..."); time.sleep(15); continue
+            
+            unread_button.click(); print(" L  'Unread' filter activated."); time.sleep(2)
+            
+            unread_chats_snapshot = get_element(driver, "chat_list_titles", find_all=True, suppress_error=True, timeout=3)
+            if not unread_chats_snapshot:
+                print("✔️ No unread chats found. Deactivating filter and waiting...")
+                try: get_element(driver, "unread_filter_button", timeout=2).click()
+                except: pass
+                time.sleep(15); continue
+            
+            print(f"📩 Found {len(unread_chats_snapshot)} unread chat(s) in this batch. Processing now...")
+
+            for chat_element in unread_chats_snapshot:
+                try:
+                    contact_name = sanitize_contact_name(chat_element.get_attribute("title"))
+                    if not contact_name: continue
+                    print(f"\n--- Processing '{contact_name}' ---")
+                    chat_element.click(); time.sleep(1)
+                except Exception as e:
+                    print(f"⚠️ Could not click on chat for '{contact_name}'. Skipping. Error: {e}"); continue
+                
+                name, number = get_details_from_header(driver)
+                if not all([name, number]):
+                    print(f"Skipping '{contact_name}' as details could not be retrieved."); continue
+
+                # --- NEW LOGIC TO FETCH ONLY NEW MESSAGES ---
+                # 1. Ask the DB for the last message we have for this contact
+                last_msg = db.get_last_message_from_db(number, YOUR_WHATSAPP_NAME)
+                
+                scroll_chat(driver)
+                
+                # 2. Pass that last message to the collector, which will stop when it sees it
+                new_data = collect_messages(driver, stop_at_last=last_msg)
+                # --- END OF NEW LOGIC ---
+                
+                db.save_messages_to_db(name, number, new_data, YOUR_WHATSAPP_NAME)
+                
+                # Only reply if there are actually new messages
+                if USE_GEMINI_REPLIES and new_data:
+                    history = list(db.get_recent_messages_for_prompt(number, count=10))
+                    reply_text = generate_gemini_reply(history) if history else "Hello! I've received your first message and will get back to you shortly."
+                    send_reply(driver, reply_text)
+                
+                close_current_chat(driver)
+            
+            print("\n✅ Finished processing batch. Waiting before next check..."); time.sleep(10)
+
+    except KeyboardInterrupt: print("\n🛑 Monitoring stopped.")
+
+
+def run_full_update(driver):
+    print("\n--- Starting Full Database Update ---")
+    contacts_to_process = get_all_contacts(driver)
+    processed_this_session = set()
+    for contact_name in tqdm(contacts_to_process, desc="📂 Processing contacts", unit="contact"):
+        name, number = open_chat(driver, contact_name, processed_this_session)
+        if not all([name, number]):
+            print(f"Skipping '{contact_name}'."); close_current_chat(driver); continue
+        
+        final_name, final_number = (number, name) if re.match(r'^\+[\d\s-]+$', name) else (name, number)
+        processed_this_session.add(final_number)
+        
+        # We now pass YOUR_WHATSAPP_NAME to this function call as well for consistency
+        last_msg = db.get_last_message_from_db(final_number, YOUR_WHATSAPP_NAME)
+        
+        scroll_chat(driver)
+        new_data = collect_messages(driver, stop_at_last=last_msg)
+        db.save_messages_to_db(final_name, final_number, new_data, YOUR_WHATSAPP_NAME)
+        close_current_chat(driver)
+    print("\n🎉 Full update complete!")
+
+
+
+def run_api_tools():
+    while True:
+        print("\n" + "-"*20 + " Database API Tools " + "-"*20)
+        print("1. Get conversation summary by title\n2. Get last messages from a conversation\n3. List all unreplied conversations\n4. Back to Main Menu")
+        choice = input("Enter your choice: ").strip()
+        if choice == '1':
+            title = input("Enter contact's title: ")
+            print("\n--- Summary ---\n" + db.get_summary_by_title(title))
+        elif choice == '2':
+            title = input("Enter contact's title: ")
+            messages = db.get_last_messages(title, count=5)
+            print(f"\n--- Last 5 Messages for '{title}' ---")
+            for msg in messages: print(f"[{msg['created_date'][:16]}] {msg['role']}: {msg['content']}")
+        elif choice == '3':
+            conversations = db.get_all_unreplied_conversations()
+            print("\n--- Unreplied Conversations ---")
+            for conv in conversations: print(f"  - {conv['title']} ({conv['phone_number']}) | Last updated: {conv['updated'][:16]}")
+        elif choice == '4': break
+        else: print("❌ Invalid choice.")
+
+# ==============================================================================
+# --- MAIN EXECUTION BLOCK ---
+# ==============================================================================
 
 if __name__ == "__main__":
-    driver = open_whatsapp()
-
-    output_filename = "whatsapp_chats.json"
-    processed_identifiers = set() # Will store numbers or names
-    chats_by_number = {}
-
-    if os.path.exists(output_filename):
-        with open(output_filename, "r", encoding="utf-8") as f:
+    db.init_db()
+    if USE_GEMINI_REPLIES and not GEMINI_API_KEY:
+        print("\n" + "="*50 + "\n⚠️ WARNING: `USE_GEMINI_REPLIES` is True, but the\n           `GEMINI_API_KEY` environment variable is not set.\n           The bot will fall back to static replies.\n" + "="*50)
+    while True:
+        print("\n" + "="*40 + "\n       WhatsApp Automation Menu\n" + "="*40)
+        print("1. Update Database (Full Scan)\n2. Monitor and Reply to Unread Messages (with AI)\n3. Database API Tools\n4. Exit")
+        choice = input("Enter your choice (1/2/3/4): ").strip()
+        if choice in ['1', '2']:
+            driver = None
             try:
-                all_chats_data_list = json.load(f)
-                for contact in all_chats_data_list:
-                    # Use number as the primary identifier, fall back to name
-                    number = contact.get("contact_number")
-                    name = contact.get("contact_name")
-                    if number:
-                        processed_identifiers.add(number)
-                        chats_by_number[number] = contact
-                    elif name: # For older entries or those without numbers
-                        processed_identifiers.add(name)
-
-                print(f"🔍 Found {len(processed_identifiers)} contacts in existing JSON file.")
-            except json.JSONDecodeError:
-                print("⚠️ Could not parse existing JSON file. A new one will be created.")
-
-    contacts_to_process =get_all_contacts(driver)
-
-    for contact_name_from_list in tqdm(contacts_to_process, desc="📂 Processing contacts", unit="contact"):
-        name, number = open_chat(driver, contact_name_from_list, processed_identifiers)
-        if name is None:
-            continue
-        
-        final_contact_name = name
-        # This regex checks if the scraped name looks like a phone number
-        if re.match(r'^\+[\d\s-]+$', name):
-             final_contact_name = number
-             number = name
-             print(f"ℹ️ Detected unsaved contact. Using '{number}' as the name.")
-        
-        # Add the unique ID to the processed set for this session
-        unique_id = number if number else name
-        processed_identifiers.add(unique_id)
-
-        stored_last_message = None
-        # Only check for last message if we have a valid number and an existing entry
-        if number and number in chats_by_number and chats_by_number[number].get("conversations"):
-            stored_last_message = chats_by_number[number]["conversations"][-1]
-
-        scroll_chat(driver)
-        new_data = collect_messages(driver, stop_at_last=stored_last_message)
-        
-        save_chat_to_json(final_contact_name, number, new_data, output_file=output_filename)
-
-    print("\n🎉 All contacts processed!")
-    driver.quit()
+                driver = open_whatsapp()
+                if choice == '1': run_full_update(driver)
+                else: monitor_and_reply_to_unread(driver)
+            except Exception as e:
+                print(f"\n❌ An unexpected error occurred: {e}")
+                import traceback
+                traceback.print_exc()
+            finally:
+                if driver:
+                    print("↪️  Closing the browser...")
+                    driver.quit()
+        elif choice == '3': run_api_tools()
+        elif choice == '4': print("👋 Exiting program."); break
+        else: print("❌ Invalid choice.")

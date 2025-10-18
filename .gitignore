@@ -9,3 +9,5 @@ test5.py
 read1.js
 read2.py
 read.py
+*.db
+__pycache__/
