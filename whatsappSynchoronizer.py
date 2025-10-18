@@ -19,7 +19,6 @@ required_libs = [
 
 def install_missing_libs():
     try:
-        # --- NEW: Update pip to the latest version ---
         print("Checking/Updating pip...")
         subprocess.check_call([sys.executable, "-m", "pip", "install", "--upgrade", "pip"])
     except Exception as e:
