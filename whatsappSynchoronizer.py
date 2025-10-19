@@ -7,6 +7,7 @@ import time
 import re
 import platform
 import database_manager as db
+import utility
 
 # Auto-install missing libraries
 required_libs = [
@@ -282,25 +283,59 @@ def open_chat(driver, contact_name, processed_items, retries=3):
 def get_details_from_header(driver):
     """
     Helper function to get name and number from the header of an OPEN chat.
-    It will return (name, None) for groups or when a number isn't found.
+    This now includes robust logic to handle all contact types, including swapped names.
     """
-    phone_number, actual_contact_name = None, None
+    actual_contact_name = None
+    phone_number = None
+
+    # Step 1: Get the name from the header. This is our most reliable piece of info.
     contact_header = get_element(driver, "chat_header_name", context_message="Read contact's name from header.")
-    if not contact_header: return None, None
+    if not contact_header:
+        return None, None # If we can't even get the header, we can't proceed.
     
-    actual_contact_name = contact_header.text
-    contact_header.click(); time.sleep(1)
+    actual_contact_name = contact_header.text.strip()
     
-    phone_element = get_element(driver, "contact_info_phone_number", timeout=5, context_message=f"Find phone number for '{actual_contact_name}'.")
+    # Step 2: Click the header to open the profile pane and try to find a number.
+    contact_header.click()
+    time.sleep(1)
+    
+    phone_element = get_element(driver, "contact_info_phone_number", timeout=5, suppress_error=True) # Suppress error as it's expected to fail for groups
+
+    # Step 3: Apply the normalization logic based on what we found.
     if phone_element:
-        phone_number = phone_element.text
-    elif re.match(r'^\+[\d\s()-]+$', actual_contact_name.strip()):
-        phone_number = actual_contact_name.strip()
-    
+        phone_text = phone_element.text.strip()
+        # CASE 1: SWAPPED NAME. The phone field starts with '~'.
+        if phone_text.startswith('~'):
+            print(f"ℹ️ Swapped Name/Number detected. Normalizing.")
+            # The real name is in the phone field, the real number is in the header.
+            final_name = phone_text
+            final_number = actual_contact_name
+        # CASE 2: NORMAL CONTACT. The phone field contains a valid number.
+        else:
+            final_name = actual_contact_name
+            final_number = phone_text
+    # Step 4: Handle cases where no phone element was found.
+    else:
+        # CASE 3: UNSAVED NUMBER. The header itself is a phone number.
+        if actual_contact_name.startswith('+'):
+            print(f"ℹ️ Unsaved contact detected. Using number as title.")
+            final_name = actual_contact_name
+            final_number = actual_contact_name
+        # CASE 4: GROUP or CONTACT WITHOUT NUMBER.
+        else:
+            # It's a group or a business account with no number listed.
+            print(f"ℹ️ Group or contact without a number detected: '{actual_contact_name}'")
+            final_name = actual_contact_name
+            final_number = None # Explicitly set number to None
+
+    # Step 5: Close the profile pane and return the clean data.
     body_element = get_element(driver, "body_tag_name")
-    if body_element: body_element.send_keys(Keys.ESCAPE); time.sleep(1)
+    if body_element:
+        body_element.send_keys(Keys.ESCAPE)
+        time.sleep(1)
     
-    return actual_contact_name, phone_number
+    print(f"    ↳ Final Name='{final_name}', Final Number='{final_number or 'None'}'")
+    return final_name, final_number
 
 def smart_scroll_and_collect(driver, stop_at_last=None):
     """
