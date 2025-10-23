@@ -1,0 +1,127 @@
+# api_client.py
+import requests
+import json
+
+API_BASE_URL = "http://127.0.0.1:5001"
+
+def init_db():
+    """Calls the API to initialize the database."""
+    try:
+        response = requests.post(f"{API_BASE_URL}/init_db")
+        response.raise_for_status()
+        print("🗄️ Database initialized successfully via API.")
+    except requests.exceptions.RequestException as e:
+        print(f"❌ API Error: Could not initialize database. Is the server running? Error: {e}")
+
+def save_messages_to_db(contact_name, phone_number, new_messages, your_name):
+    """Calls the API to save new messages."""
+    if not new_messages:
+        return
+    payload = {
+        "contact_name": contact_name,
+        "phone_number": phone_number,
+        "new_messages": new_messages,
+        "your_name": your_name
+    }
+    try:
+        response = requests.post(f"{API_BASE_URL}/messages", json=payload)
+        response.raise_for_status()
+        print(f"📡 Sent {len(new_messages)} messages for '{contact_name}' to API for saving.")
+    except requests.exceptions.RequestException as e:
+        print(f"❌ API Error: Could not save messages for '{contact_name}'. Error: {e}")
+
+def get_last_message_from_db(phone_number, title, your_name):
+    """Calls the API to get the last message's meta_text."""
+    params = {
+        "phone_number": phone_number,
+        "title": title,
+        "your_name": your_name
+    }
+    try:
+        response = requests.get(f"{API_BASE_URL}/last_message", params=params)
+        response.raise_for_status()
+        return response.json().get('meta_text')
+    except requests.exceptions.RequestException as e:
+        print(f"❌ API Error: Could not get last message for '{title}'. Error: {e}")
+        return None
+
+def trigger_reply(phone_number):
+    """Calls the local API to start the AI reply process."""
+    try:
+        payload = {"phone_number": phone_number}
+        # We use a short timeout because this is a "fire-and-forget" call
+        requests.post(f"{API_BASE_URL}/trigger-reply", json=payload, timeout=5)
+    except requests.exceptions.RequestException as e:
+        # It's often okay if this times out, as it means the request was sent.
+        print(f"⚠️  API Warning: Could not trigger AI reply. May be a timeout, which is okay. Error: {e}")
+
+def get_contact_details(phone_number):
+    """Calls the API to get a contact's title and last message bookmark."""
+    try:
+        params = {"phone_number": phone_number}
+        response = requests.get(f"{API_BASE_URL}/contact-details", params=params)
+        if response.status_code == 200:
+            return response.json()
+        elif response.status_code == 404:
+            print(f"API Info: Contact with number {phone_number} is new to the database.")
+            return None
+        else:
+            response.raise_for_status()
+            return None
+    except requests.exceptions.RequestException as e:
+        print(f"❌ API Error: Could not get contact details. Error: {e}")
+        return None
+
+# --- THIS IS THE FUNCTION YOU ASKED FOR ---
+def send_message_via_api(phone_number, text):
+    """
+    Calls the main API endpoint to trigger a full, independent send process.
+    """
+    try:
+        payload = {
+            "phone_number": phone_number,
+            "text": text
+        }
+        # This is a "fire-and-forget" call. We expect a quick 202 Accepted response.
+        response = requests.post(f"{API_BASE_URL}/send-message", json=payload, timeout=10)
+        
+        # Check for immediate errors from the server (like bad input or server config issues)
+        if response.status_code != 202:
+             print(f"❌ API Error: Server responded with status {response.status_code}. Message: {response.text}")
+             return False
+
+        print(f"\n✅ API request accepted. The server will now handle the sending process.")
+        print("   (Check the server's terminal window for real-time progress).")
+        return True
+
+    except requests.exceptions.RequestException as e:
+        print(f"\n❌ API Connection Error: Could not connect to the server to send the message.")
+        print(f"   Please ensure the main script is running. Error: {e}")
+        return False
+
+# --- API Tool Functions ---
+def get_summary_by_title(title):
+    try:
+        response = requests.get(f"{API_BASE_URL}/summary", params={'title': title})
+        response.raise_for_status()
+        return response.json().get('summary', "No summary found.")
+    except requests.exceptions.RequestException as e:
+        return f"API Error: {e}"
+
+def get_last_messages(title, count=5):
+    try:
+        response = requests.get(f"{API_BASE_URL}/messages", params={'title': title, 'count': count})
+        response.raise_for_status()
+        return response.json()
+    except requests.exceptions.RequestException as e:
+        print(f"API Error: {e}")
+        return []
+
+def get_all_unreplied_conversations():
+    try:
+        response = requests.get(f"{API_BASE_URL}/unreplied")
+        response.raise_for_status()
+        return response.json()
+    except requests.exceptions.RequestException as e:
+        print(f"API Error: {e}")
+        return []

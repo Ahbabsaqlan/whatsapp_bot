@@ -1,7 +1,36 @@
+# In database_manager.py
+
 import sqlite3
 import datetime
+import re # <-- Add this import
 
 DB_NAME = "whatsapp_archive.db"
+
+# --- NEW: Universal Phone Number Normalizer ---
+def normalize_phone_number(phone_number_str):
+    """
+    Cleans a phone number string into a standard international format.
+    e.g., "+880 1318-463901" -> "+8801318463901"
+    e.g., "01318463901" -> "+8801318463901" (Assumes Bangladesh code)
+    """
+    if not phone_number_str:
+        return None
+    
+    # Remove all non-digit characters except the leading '+'
+    digits = re.sub(r'[^\d+]', '', phone_number_str)
+    
+    # If it's a local BD number, add the country code
+    if len(digits) == 11 and digits.startswith('01'):
+        return f"+880{digits[1:]}"
+    
+    # If it's already in international format (with or without +)
+    if len(digits) > 11 and digits.startswith('880'):
+        return f"+{digits}"
+        
+    if digits.startswith('+'):
+         return digits
+
+    return phone_number_str # Fallback for unknown formats
 
 def get_db_connection():
     """Establishes a connection to the SQLite database."""
@@ -45,16 +74,17 @@ def init_db():
     conn.close()
     print("🗄️ Database initialized successfully.")
 
+
 def save_messages_to_db(contact_name, phone_number, new_messages, your_name):
+    normalized_number = normalize_phone_number(phone_number)
     if not new_messages:
-        print(f"✔️ No new messages to save for '{contact_name}'")
         return
 
     conn = get_db_connection()
     cursor = conn.cursor()
     now = datetime.datetime.now().isoformat()
 
-    if phone_number:
+    if normalized_number:
         cursor.execute("SELECT id, size FROM Conversations WHERE phone_number = ?", (phone_number,))
     else:
         cursor.execute("SELECT id, size FROM Conversations WHERE title = ? AND phone_number IS NULL", (contact_name,))
@@ -65,21 +95,38 @@ def save_messages_to_db(contact_name, phone_number, new_messages, your_name):
         conversation_id, current_size = conversation['id'], conversation['size']
         cursor.execute("UPDATE Conversations SET updated = ?, title = ? WHERE id = ?", (now, contact_name, conversation_id))
     else:
-        cursor.execute("INSERT INTO Conversations (title, phone_number, created, updated) VALUES (?, ?, ?, ?)", (contact_name, phone_number, now, now))
+        cursor.execute("INSERT INTO Conversations (title, phone_number, created, updated) VALUES (?, ?, ?, ?)", (contact_name, normalized_number, now, now))
         conversation_id, current_size = cursor.lastrowid, 0
     
     messages_added = 0
     for idx, msg in enumerate(new_messages):
-        role = "me" if msg['sender'] == your_name else "user"
+        # --- THIS IS THE FIX for the 'You' sender name ---
+        sender = msg.get('sender', '')
+        role = "me" if sender == your_name or sender == "You" else "user"
+        
         try:
-            msg_datetime = datetime.datetime.strptime(f"{msg['date']} {msg['time']}", "%m/%d/%Y %I:%M %p")
+            # --- THIS IS THE FIX for the timestamp race condition ---
+            msg_date = msg.get('date')
+            msg_time = msg.get('time')
+            if not msg_date or not msg_time:
+                raise ValueError("Incomplete timestamp data from scrape")
+
+            msg_datetime = datetime.datetime.strptime(f"{msg_date} {msg_time}", "%m/%d/%Y %I:%M %p")
             created_iso = msg_datetime.isoformat()
-        except ValueError:
+        except (ValueError, TypeError):
+            # If parsing fails for any reason, use the current time as a safe fallback
             created_iso = now
+
+        content = msg.get('content', '')
+        meta_text = msg.get('meta_text')
+
+        # A message without meta_text is invalid and cannot be stored uniquely
+        if not meta_text:
+            continue
 
         cursor.execute(
             "INSERT OR IGNORE INTO Messages (conversation_id, role, content, message_index, created_date, meta_text) VALUES (?, ?, ?, ?, ?, ?)",
-            (conversation_id, role, msg['content'], current_size + messages_added + 1, created_iso, msg['meta_text'])
+            (conversation_id, role, content, current_size + messages_added + 1, created_iso, meta_text)
         )
         if cursor.rowcount > 0:
             messages_added += 1
@@ -87,12 +134,11 @@ def save_messages_to_db(contact_name, phone_number, new_messages, your_name):
     if messages_added > 0:
         new_total_size = current_size + messages_added
         cursor.execute("UPDATE Conversations SET size = ? WHERE id = ?", (new_total_size, conversation_id))
-        # Generate summary after updating the size
         summary = _generate_summary(cursor, conversation_id)
         cursor.execute("UPDATE Conversations SET context_summary = ? WHERE id = ?", (summary, conversation_id))
         print(f"💾 Saved {messages_added} new messages for '{contact_name}' to the database.")
     else:
-        print(f"✔️ No new messages to save for '{contact_name}'")
+        print(f"✔️ No new, unique messages to save for '{contact_name}'.")
 
     conn.commit()
     conn.close()
@@ -184,3 +230,29 @@ def get_recent_messages_for_prompt(phone_number, count=10):
     messages = cursor.fetchall()
     conn.close()
     return reversed(messages)
+
+def get_contact_details_by_phone(phone_number):
+    """
+    Finds a conversation by phone number and returns its title and the meta_text of the last message.
+    """
+    normalized_number = normalize_phone_number(phone_number)
+    if not normalized_number: return None
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    
+    # This single query gets the conversation title and the last message's meta_text if they exist.
+    query = """
+        SELECT
+            c.title,
+            (SELECT m.meta_text FROM Messages m WHERE m.conversation_id = c.id ORDER BY m.message_index DESC LIMIT 1) as last_meta_text
+        FROM Conversations c
+        WHERE c.phone_number = ?
+    """
+    cursor.execute(query, (normalized_number,))
+    contact_data = cursor.fetchone()
+    conn.close()
+
+    if contact_data:
+        return {"title": contact_data["title"], "last_meta_text": contact_data["last_meta_text"]}
+    else:
+        return None
