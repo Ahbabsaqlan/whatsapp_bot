@@ -12,7 +12,7 @@ from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.chrome.options import Options
-from selenium.common.exceptions import NoSuchElementException, TimeoutException, StaleElementReferenceException
+from selenium.common.exceptions import NoSuchElementException, TimeoutException, StaleElementReferenceException,NoSuchWindowException
 from webdriver_manager.chrome import ChromeDriverManager
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
@@ -111,24 +111,93 @@ def ensure_session_dir():
     if not os.path.exists(session_dir): os.makedirs(session_dir)
     return session_dir
 
-def get_all_contacts(driver):
-    try: chat_list = driver.find_element(By.ID, SELECTORS["chat_list_pane_id"])
-    except NoSuchElementException: return []
-    contacts_set, last_height, consecutive_no_change = set(), -1, 0
-    while consecutive_no_change < 3:
-        for el in get_element(driver, "chat_list_titles", timeout=2, find_all=True):
-            try:
-                name = el.get_attribute("title")
-                if name: contacts_set.add(name.strip())
-            except StaleElementReferenceException: continue
-        driver.execute_script("arguments[0].scrollTop += 300;", chat_list)
-        time.sleep(1)
-        new_height = driver.execute_script("return arguments[0].scrollTop", chat_list)
-        if new_height == last_height: consecutive_no_change += 1
-        else: consecutive_no_change, last_height = 0, new_height
-        if new_height >= driver.execute_script("return arguments[0].scrollHeight", chat_list): break
-    return list(contacts_set)
+# def get_all_contacts(driver):
+#     try: chat_list = driver.find_element(By.ID, SELECTORS["chat_list_pane_id"])
+#     except NoSuchElementException: return []
+#     contacts_set, last_height, consecutive_no_change = set(), -1, 0
+#     while consecutive_no_change < 3:
+#         for el in get_element(driver, "chat_list_titles", timeout=2, find_all=True):
+#             try:
+#                 name = el.get_attribute("title")
+#                 if name: contacts_set.add(name.strip())
+#                 print(f"   ...found contact: '{name.strip()}'")
+#             except StaleElementReferenceException: continue
+#         print(f"   ...collected {len(contacts_set)} unique contacts so far...")
+#         driver.execute_script("arguments[0].scrollTop += 1200;", chat_list)
+#         time.sleep(1)
+#         new_height = driver.execute_script("return arguments[0].scrollTop", chat_list)
+#         if new_height == last_height: consecutive_no_change += 1
+#         else: consecutive_no_change, last_height = 0, new_height
+#         if new_height >= driver.execute_script("return arguments[0].scrollHeight", chat_list): break
+#     return list(contacts_set)
 
+
+def get_all_contacts(driver):
+    """
+    Scrolls through the chat list and scrapes all contact names, preserving duplicates.
+    It is resilient to the browser window closing unexpectedly.
+    """
+    try:
+        chat_list = driver.find_element(By.ID, SELECTORS["chat_list_pane_id"])
+    except (NoSuchElementException, NoSuchWindowException):
+        print("❌ Could not find chat list pane or browser window closed.")
+        return []
+
+    contacts_list = []
+    seen_element_ids = set() # Use a set to track processed Selenium element IDs
+
+    last_height = -1
+    consecutive_no_change = 0
+
+    print("--- Starting contact scraping ---")
+    while consecutive_no_change < 4: # Increased for more tolerance on slow loads
+        try:
+            # Find all potential contact elements in the current view
+            contact_elements = get_element(driver, "chat_list_titles", timeout=3, find_all=True)
+            
+            new_contacts_found_this_scroll = 0
+            for el in contact_elements:
+                element_id = el.id
+                # If we haven't processed this specific element yet...
+                if element_id not in seen_element_ids:
+                    name = el.get_attribute("title")
+                    if name:
+                        contacts_list.append(name.strip())
+                        new_contacts_found_this_scroll += 1
+                    # Mark this element as seen, whether it had a name or not
+                    seen_element_ids.add(element_id)
+
+            if new_contacts_found_this_scroll > 0:
+                 print(f"   ...found {new_contacts_found_this_scroll} new contacts. Total collected: {len(contacts_list)}")
+
+            # --- Resilient Scrolling ---
+            # Get current scroll position and max scroll height before scrolling
+            current_scroll = driver.execute_script("return arguments[0].scrollTop", chat_list)
+            max_scroll = driver.execute_script("return arguments[0].scrollHeight", chat_list)
+
+            # Scroll down
+            driver.execute_script("arguments[0].scrollTop += 500;", chat_list)
+            time.sleep(1.5)
+
+            new_height = driver.execute_script("return arguments[0].scrollTop", chat_list)
+
+            # Check if we are at the bottom or if the scroll didn't work
+            if new_height == last_height or new_height + driver.execute_script("return arguments[0].offsetHeight", chat_list) >= max_scroll:
+                consecutive_no_change += 1
+                print(f"   ...scroll position unchanged. Consecutive count: {consecutive_no_change}")
+            else:
+                consecutive_no_change = 0
+                last_height = new_height
+        
+        except (StaleElementReferenceException, NoSuchWindowException) as e:
+            print(f"⚠️ Browser state changed during scroll ({type(e).__name__}). Ending contact collection.")
+            break # Exit the loop gracefully
+        except Exception as e:
+            print(f"❌ An unexpected error occurred during contact scraping: {e}")
+            break
+
+    print(f"--- Finished contact scraping. Total entries found: {len(contacts_list)} ---")
+    return contacts_list
 
 def open_chat(driver, contact_name, processed_items, retries=3):
     """Modified to use clipboard for searching, ensuring emoji compatibility."""
@@ -181,6 +250,7 @@ def open_chat(driver, contact_name, processed_items, retries=3):
         
     return None, None
 
+
 def get_details_from_header(driver):
     """
     Gets contact details from the header. This version now includes a fallback
@@ -205,6 +275,9 @@ def get_details_from_header(driver):
     if not phone_element:
         print(f"   ...standard number not found for '{actual_contact_name}', checking for business account number.")
         contact_body=get_element(driver,"contact_info_body_container", timeout=10)
+        if not contact_body:
+            print(f"❌ Could not find contact info body for '{actual_contact_name}' maybe a group chat.")
+            return actual_contact_name, None
         driver.execute_script("arguments[0].scrollTop = arguments[0].scrollHeight", contact_body)
         time.sleep(1)
         phone_element = get_element(driver, "contact_info_phone_number_business", timeout=3, suppress_error=True)
@@ -241,11 +314,12 @@ def get_details_from_header(driver):
     print(f"    ↳ Final Name='{final_name}', Final Number='{final_number or 'None'}'")
     return final_name, final_number
 
+
 def smart_scroll_and_collect(driver, stop_at_last=None):
     """
     Scrolls up the chat pane page by page, collecting messages as it goes.
-    Stops scrolling as soon as the 'stop_at_last' message's meta_text is found.
-    This is far more efficient than scrolling all the way to the top first.
+    Stops scrolling when the 'stop_at_last' message is found.
+    Correctly handles the 'Click to get older messages' button, even on an empty initial screen.
     """
     chat_container = get_element(driver, "chat_container", timeout=10)
     if not chat_container:
@@ -262,33 +336,50 @@ def smart_scroll_and_collect(driver, stop_at_last=None):
     while not found_stop_point and scroll_count < max_scrolls:
         current_visible_messages = get_element(driver, "all_messages", find_all=True, suppress_error=True)
         
-        if not current_visible_messages:
-            break
-
         new_messages_found_this_scroll = False
-        for msg_element in reversed(current_visible_messages):
-            parsed = parse_message(msg_element)
-            if parsed:
-                if parsed['meta_text'] in seen_meta_texts:
-                    continue
-                
-                new_messages_found_this_scroll = True
-                all_messages_data.append(parsed)
-                seen_meta_texts.add(parsed['meta_text'])
+        
+        if current_visible_messages:
+            for msg_element in reversed(current_visible_messages):
+                parsed = parse_message(msg_element)
+                if parsed:
+                    if parsed['meta_text'] in seen_meta_texts:
+                        continue
+                    
+                    new_messages_found_this_scroll = True
+                    all_messages_data.append(parsed)
+                    seen_meta_texts.add(parsed['meta_text'])
 
-                if stop_at_last and parsed['meta_text'] == stop_at_last:
-                    print(f"⏹️ Reached previously stored last message. Stopping scroll and collection.")
-                    found_stop_point = True
-                    all_messages_data.pop() 
-                    break
+                    if stop_at_last and parsed['meta_text'] == stop_at_last:
+                        print(f"⏹️ Reached previously stored last message. Stopping scroll and collection.")
+                        found_stop_point = True
+                        all_messages_data.pop() 
+                        break
 
         if found_stop_point:
             break
 
         if not new_messages_found_this_scroll:
-            print("Reached top of chat or found no new messages on this scroll.")
-            break
+            print("   ...no new messages on this screen, checking for 'load older' button...")
             
+            load_more_button = get_element(driver, "load_older_messages_button", timeout=2, suppress_error=True)
+            
+            if load_more_button:
+                try:
+                    print("🖱️ Found and clicking 'load older messages' button.")
+                    load_more_button.click()
+                    time.sleep(4)  
+                    scroll_count += 1
+                    continue 
+                except Exception as e:
+                    print(f"⚠️ Could not click the 'load older' button, assuming we are at the top: {e}")
+                    break
+            else:
+                if scroll_count > 0:
+                    print("✔️ Reached top of chat.")
+                else:
+                    print("✔️ No messages found in chat.")
+                break
+        
         driver.execute_script("arguments[0].scrollTop = 0;", chat_container)
         print("   ...scrolling up for older messages...")
         time.sleep(2)
@@ -350,7 +441,6 @@ def parse_message(msg):
         }
     except (NoSuchElementException, StaleElementReferenceException): 
         return None
-
 
 
 def send_reply(driver, reply_text):

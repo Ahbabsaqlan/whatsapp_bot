@@ -10,7 +10,7 @@
   "contact_info_phone_number_business": "//div[.//span[contains(., 'About and phone number')]]/following-sibling::div[last()]//span/span",
   "body_tag_name": "body",
   "chat_container": "div#main div.copyable-area div[tabindex='0']",
-  "load_older_messages_button": "//button[.//div[contains(text(), 'Click here to get older messages')]]",
+  "load_older_messages_button": "//button[.//div[contains(text(), 'Click here to get older messages from your phone.')]]",
   "all_messages": "div.message-in, div.message-out",
   "message_meta_data": "div[data-pre-plain-text]",
   "message_image": ".//div[@role='button' and @aria-label='Open picture']",

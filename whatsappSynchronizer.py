@@ -5,23 +5,15 @@ import utility
 import random
 import api_client as db
 import selenium_handler as sh
+import config
 
 utility.install_missing_libs()
 
 from tqdm import tqdm
 from api_routes import app
 
-# ==============================================================================
-# --- CONFIGURATION SECTION ---
-# ==============================================================================
 
-YOUR_WHATSAPP_NAME = "AHBAB SAKALAN"
-SIMULATED_AI_REPLIES = [
-    "Hello! Thanks for your message. Ahbab has received it and will get back to you soon.",
-    "Hi there! Ahbab has seen your message and will reply shortly. Thank you!",
-    "Got it! Thanks for reaching out. Ahbab will respond as soon as possible.",
-    "Message received. Ahbab will get back to you shortly. Have a great day!"
-]
+
 
 # ==============================================================================
 # --- MAIN WORKFLOW FUNCTIONS ---
@@ -55,7 +47,7 @@ def process_unreplied_queue():
                 print(f"   ⚠️ Skipping '{title}' as it has no phone number.")
                 continue
 
-            reply_text = random.choice(SIMULATED_AI_REPLIES)
+            reply_text = random.choice(config.SIMULATED_AI_REPLIES)
             print(f"   🤖 Triggering API reply for {title} ({number})...")
             
             db.send_message_via_api(number, reply_text)
@@ -92,7 +84,7 @@ def run_sync_task():
                 if not name: continue
                 
                 processed_in_batch.add(number if number else name)
-                last_msg = db.get_last_message_from_db(number, name, YOUR_WHATSAPP_NAME)
+                last_msg = db.get_last_message_from_db(number, name, config.YOUR_WHATSAPP_NAME)
                 new_data = sh.smart_scroll_and_collect(driver, stop_at_last=last_msg)
                 
                 
@@ -118,16 +110,16 @@ def monitor_sync_and_reply():
     print("\n--- Starting Continuous Monitor, Sync, and Reply (Press Ctrl+C to stop) ---")
     try:
         # --- PHASE 1: PRE-SYNC REPLY ---
-        print("\n--- [Phase 1 of 3] Processing any existing unreplied messages ---")
-        process_unreplied_queue()
+        # print("\n--- [Phase 1 of 3] Processing any existing unreplied messages ---")
+        # process_unreplied_queue()
         while True:
             # --- PHASE 2: SYNC FROM UI ---
             print("\n--- [Phase 2 of 3] Starting sync task for new messages ---")
             run_sync_task()
             
-            # --- PHASE 3: POST-SYNC REPLY ---
-            print("\n--- [Phase 3 of 3] Processing any newly synced unreplied messages ---")
-            process_unreplied_queue()
+            # # --- PHASE 3: POST-SYNC REPLY ---
+            # print("\n--- [Phase 3 of 3] Processing any newly synced unreplied messages ---")
+            # process_unreplied_queue()
             
             print("\n--- Cycle Complete ---")
             print("...waiting 60 seconds before next cycle...")
@@ -140,6 +132,7 @@ def monitor_sync_and_reply():
 def run_full_update(driver):
     print("\n--- Starting Full Database Update ---")
     contacts_to_process = sh.get_all_contacts(driver)
+    print(f"📋 Found {len(contacts_to_process)} contacts to process.")
     processed_this_session = set()
     for contact_name in tqdm(contacts_to_process, desc="📂 Processing contacts", unit="contact"):
         name, number = sh.open_chat(driver, contact_name, processed_this_session)
@@ -147,7 +140,7 @@ def run_full_update(driver):
             print(f"Skipping '{contact_name}' as it could not be opened."); sh.close_current_chat(driver); continue
         unique_id = number if number else name
         processed_this_session.add(unique_id)
-        last_msg = db.get_last_message_from_db(number, name, YOUR_WHATSAPP_NAME)
+        last_msg = db.get_last_message_from_db(number, name, config.YOUR_WHATSAPP_NAME)
         new_data = sh.smart_scroll_and_collect(driver, stop_at_last=last_msg)
         db.save_messages_to_db(name, number, new_data)
         sh.close_current_chat(driver)
@@ -202,7 +195,7 @@ def run_api_tools():
 # --- MAIN EXECUTION BLOCK ---
 # ==============================================================================
 if __name__ == "__main__":
-    api_thread = threading.Thread(target=run_api_server, args=(YOUR_WHATSAPP_NAME,), daemon=True)
+    api_thread = threading.Thread(target=run_api_server, args=(config.YOUR_WHATSAPP_NAME,), daemon=True)
     api_thread.start()
     time.sleep(2)
 
@@ -211,10 +204,11 @@ if __name__ == "__main__":
     while True:
         print("\n" + "="*40 + "\n       WhatsApp Automation Menu\n" + "="*40)
         print("1. Update Database (Full Scan)")
-        print("2. Monitor, Sync, and Reply (Continuous)")
-        print("3. Database API Tools")
-        print("4. Exit")
-        choice = input("Enter your choice (1/2/3/4): ").strip()
+        print("2. Monitor, Sync")
+        print("3. Reply Unreplied Messages")
+        print("4. Database API Tools")
+        print("5. Exit")
+        choice = input("Enter your choice (1/2/3/4/5): ").strip()
         
         if choice == '1': 
             driver = None
@@ -227,10 +221,11 @@ if __name__ == "__main__":
         
         elif choice == '2': 
             monitor_sync_and_reply()
-        
         elif choice == '3': 
-            run_api_tools()
+            process_unreplied_queue()
         elif choice == '4': 
+            run_api_tools()
+        elif choice == '5': 
             print("👋 Exiting program."); break
         else: 
             print("❌ Invalid choice.")
