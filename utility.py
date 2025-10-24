@@ -9,7 +9,8 @@ required_libs = [
     "tqdm",
     "google-generativeai",
     "Flask",
-    "requests" 
+    "requests",
+    "pyperclip" 
 ]
 
 def install_missing_libs():

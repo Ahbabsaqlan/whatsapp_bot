@@ -13,15 +13,14 @@ def init_db():
     except requests.exceptions.RequestException as e:
         print(f"❌ API Error: Could not initialize database. Is the server running? Error: {e}")
 
-def save_messages_to_db(contact_name, phone_number, new_messages, your_name):
+def save_messages_to_db(contact_name, phone_number, new_messages):
     """Calls the API to save new messages."""
     if not new_messages:
         return
     payload = {
         "contact_name": contact_name,
         "phone_number": phone_number,
-        "new_messages": new_messages,
-        "your_name": your_name
+        "new_messages": new_messages
     }
     try:
         response = requests.post(f"{API_BASE_URL}/messages", json=payload)
@@ -45,15 +44,6 @@ def get_last_message_from_db(phone_number, title, your_name):
         print(f"❌ API Error: Could not get last message for '{title}'. Error: {e}")
         return None
 
-def trigger_reply(phone_number):
-    """Calls the local API to start the AI reply process."""
-    try:
-        payload = {"phone_number": phone_number}
-        # We use a short timeout because this is a "fire-and-forget" call
-        requests.post(f"{API_BASE_URL}/trigger-reply", json=payload, timeout=5)
-    except requests.exceptions.RequestException as e:
-        # It's often okay if this times out, as it means the request was sent.
-        print(f"⚠️  API Warning: Could not trigger AI reply. May be a timeout, which is okay. Error: {e}")
 
 def get_contact_details(phone_number):
     """Calls the API to get a contact's title and last message bookmark."""
@@ -72,7 +62,6 @@ def get_contact_details(phone_number):
         print(f"❌ API Error: Could not get contact details. Error: {e}")
         return None
 
-# --- THIS IS THE FUNCTION YOU ASKED FOR ---
 def send_message_via_api(phone_number, text):
     """
     Calls the main API endpoint to trigger a full, independent send process.
@@ -82,10 +71,8 @@ def send_message_via_api(phone_number, text):
             "phone_number": phone_number,
             "text": text
         }
-        # This is a "fire-and-forget" call. We expect a quick 202 Accepted response.
         response = requests.post(f"{API_BASE_URL}/send-message", json=payload, timeout=10)
         
-        # Check for immediate errors from the server (like bad input or server config issues)
         if response.status_code != 202:
              print(f"❌ API Error: Server responded with status {response.status_code}. Message: {response.text}")
              return False

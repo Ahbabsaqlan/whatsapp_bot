@@ -5,7 +5,9 @@
   "search_box": "//div[@contenteditable='true'][@data-tab='3']",
   "search_result_contact_template": "//div[@id='pane-side']//span[@title='{}']",
   "chat_header_name": "div#main header div[role='button'][tabindex='0'] span[dir='auto']",
+  "contact_info_body_container": "//header[.//div[@title='Contact info']]/following-sibling::div[1]",
   "contact_info_phone_number": "header:has(div[title='Contact info']) + div span.selectable-text.copyable-text[dir='auto'] div",
+  "contact_info_phone_number_business": "//div[.//span[contains(., 'About and phone number')]]/following-sibling::div[last()]//span/span",
   "body_tag_name": "body",
   "chat_container": "div#main div.copyable-area div[tabindex='0']",
   "load_older_messages_button": "//button[.//div[contains(text(), 'Click here to get older messages')]]",
@@ -23,4 +25,3 @@
   "chat_menu_button": "//*[@id='main']/header/div[3]/div/div[2]/div/span/div/div",
   "chat_close_option": "//li[@role='button']//span[text()='Close chat']"
 }
-

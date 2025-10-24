@@ -6,6 +6,7 @@ import time
 import re
 import platform
 import random
+import pyperclip
 from selenium.webdriver.common.keys import Keys
 from selenium import webdriver
 from selenium.webdriver.common.by import By
@@ -117,7 +118,7 @@ def get_all_contacts(driver):
     while consecutive_no_change < 3:
         for el in get_element(driver, "chat_list_titles", timeout=2, find_all=True):
             try:
-                name = sanitize_contact_name(el.get_attribute("title"))
+                name = el.get_attribute("title")
                 if name: contacts_set.add(name.strip())
             except StaleElementReferenceException: continue
         driver.execute_script("arguments[0].scrollTop += 300;", chat_list)
@@ -128,19 +129,24 @@ def get_all_contacts(driver):
         if new_height >= driver.execute_script("return arguments[0].scrollHeight", chat_list): break
     return list(contacts_set)
 
-def sanitize_contact_name(name):
-    return re.sub(r'[^\u0000-\uFFFF]', '', name) if name else ""
 
 def open_chat(driver, contact_name, processed_items, retries=3):
-    """Modified to not require a phone number and to check a combined processed set."""
+    """Modified to use clipboard for searching, ensuring emoji compatibility."""
     for attempt in range(retries):
         search_box = get_element(driver, "search_box", context_message="Find main chat search box.")
         if not search_box: return None, None
+        
         os_name = platform.system()
+        control_key = Keys.COMMAND if os_name == "Darwin" else Keys.CONTROL
+        
         search_box.click(); time.sleep(0.5)
-        search_box.send_keys(Keys.COMMAND + "a" if os_name != "Windows" else Keys.CONTROL + "a")
+        search_box.send_keys(control_key + "a")
         search_box.send_keys(Keys.BACKSPACE); time.sleep(0.5)
-        search_box.send_keys(contact_name); time.sleep(2)
+        
+        pyperclip.copy(contact_name) 
+        search_box.send_keys(control_key + "v") 
+        time.sleep(2)
+        
         chat_results = get_element(driver, "search_result_contact_template", find_all=True, format_args=[contact_name], context_message=f"Find '{contact_name}' in search results.")
         if not chat_results:
             print(f"⚠️ Attempt {attempt+1}: No results for '{contact_name}'. Retrying..."); time.sleep(2); continue
@@ -158,13 +164,27 @@ def open_chat(driver, contact_name, processed_items, retries=3):
             unique_id = phone_number if phone_number else actual_contact_name
             if unique_id in processed_items: continue
             
+
+            search_box.click(); time.sleep(0.2)
+            search_box.send_keys(control_key + "a")
+            search_box.send_keys(Keys.BACKSPACE); time.sleep(0.2)
             return actual_contact_name, phone_number
+            
+    # Clear search box if search failed completely
+    search_box = get_element(driver, "search_box")
+    if search_box:
+        os_name = platform.system()
+        control_key = Keys.COMMAND if os_name == "Darwin" else Keys.CONTROL
+        search_box.click(); time.sleep(0.2)
+        search_box.send_keys(control_key + "a")
+        search_box.send_keys(Keys.BACKSPACE); time.sleep(0.2)
+        
     return None, None
 
 def get_details_from_header(driver):
     """
-    Helper function to get name and number from the header of an OPEN chat.
-    This now includes robust logic to handle all contact types, including swapped names.
+    Gets contact details from the header. This version now includes a fallback
+    to find phone numbers on Business Accounts.
     """
     actual_contact_name = None
     phone_number = None
@@ -176,12 +196,22 @@ def get_details_from_header(driver):
     actual_contact_name = contact_header.text.strip()
     
     contact_header.click()
-    time.sleep(1)
+    time.sleep(1.5) 
     
-    phone_element = get_element(driver, "contact_info_phone_number", timeout=5, suppress_error=True)
+    # 1. Primary attempt: Try to find the number using the standard selector.
+    phone_element = get_element(driver, "contact_info_phone_number", timeout=4, suppress_error=True)
+
+    # 2. Fallback: If the primary attempt fails, try the business account selector.
+    if not phone_element:
+        print(f"   ...standard number not found for '{actual_contact_name}', checking for business account number.")
+        contact_body=get_element(driver,"contact_info_body_container", timeout=10)
+        driver.execute_script("arguments[0].scrollTop = arguments[0].scrollHeight", contact_body)
+        time.sleep(1)
+        phone_element = get_element(driver, "contact_info_phone_number_business", timeout=3, suppress_error=True)
 
     if phone_element:
         phone_text = phone_element.text.strip()
+        # The logic for swapped/unsaved numbers remains the same and is still valid.
         if phone_text.startswith('~'):
             print(f"ℹ️ Swapped Name/Number detected. Normalizing.")
             final_name = phone_text
@@ -190,6 +220,7 @@ def get_details_from_header(driver):
             final_name = actual_contact_name
             final_number = phone_text
     else:
+        # This handles groups or contacts with no visible number
         if actual_contact_name.startswith('+'):
             print(f"ℹ️ Unsaved contact detected. Using number as title.")
             final_name = actual_contact_name
@@ -199,11 +230,11 @@ def get_details_from_header(driver):
             final_name = actual_contact_name
             final_number = None
 
+    # Close the contact info panel
     body_element = get_element(driver, "body_tag_name")
     if body_element:
         body_element.send_keys(Keys.ESCAPE)
         time.sleep(1)
-    
 
     final_number = normalize_phone_number(final_number)
 
@@ -270,22 +301,56 @@ def smart_scroll_and_collect(driver, stop_at_last=None):
 
 
 def parse_message(msg):
+    """
+    Parses a message element, fixes the date format, and creates a more
+    reliable unique ID to prevent skipping messages sent in the same minute.
+    """
     try:
+        msg_class = msg.get_attribute('class')
+        role = 'me' if 'message-out' in msg_class else 'user'
+        
         meta_div = msg.find_element(By.CSS_SELECTOR, SELECTORS["message_meta_data"])
         meta_text = meta_div.get_attribute("data-pre-plain-text")
         
         match = re.match(r"\[(.*?), (.*?)\] (.*?):", meta_text)
         if not match: return None
+        
         time_str, date_str, sender = match.groups()
-        content = "📎 Media (Image/Video/Doc)"
+        
+        content = None
         try:
             text_element = msg.find_element(By.CSS_SELECTOR, SELECTORS["message_text_content"])
             text = text_element.text.strip()
-            if text: content = text
-        except NoSuchElementException: pass
-            
-        return {"date": date_str.strip(), "time": time_str.strip(), "sender": sender.strip(), "content": content.strip(), "meta_text": meta_text}
-    except (NoSuchElementException, StaleElementReferenceException): return None
+            if text:
+                content = text
+        except NoSuchElementException:
+            pass
+        if content is None:
+            try:
+                body_element = msg.find_element(By.CSS_SELECTOR, "div.copyable-text")
+                body_text = body_element.text.strip()
+                if body_text:
+                    if re.search(r'\d{1,2}:\d{2}\s*(?:AM|PM)$', body_text):
+                        body_text = re.sub(r'\s*\d{1,2}:\d{2}\s*(?:AM|PM)$', '', body_text).strip()
+                    content = body_text
+            except NoSuchElementException:
+                pass
+        if content is None:
+            content = "📎 Media (Image/Video/Doc/Sticker)"
+
+        unique_meta_text = f"{meta_text}{content[:50]}"
+
+        return {
+            "date": date_str.strip(), # This is 'DD/MM/YYYY'
+            "time": time_str.strip(),
+            "sender": sender.strip(),
+            "content": content.strip(),
+            "meta_text": unique_meta_text, 
+            "role": role
+        }
+    except (NoSuchElementException, StaleElementReferenceException): 
+        return None
+
 
 
 def send_reply(driver, reply_text):
