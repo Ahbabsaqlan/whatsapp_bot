@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
+import utility
+utility.install_missing_libs()
 import time
 import threading
-import utility
 import random
 import api_client as db
 import selenium_handler as sh
 import config  # Import the new configuration file
 
-utility.install_missing_libs()
 
 from tqdm import tqdm
 from selenium.webdriver.support import expected_conditions as EC
