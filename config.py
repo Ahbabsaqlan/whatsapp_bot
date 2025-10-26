@@ -1,7 +1,7 @@
-YOUR_WHATSAPP_NAME = "Raphael Choudhury"
+YOUR_WHATSAPP_NAME = "Raphaels Assistant"
 SIMULATED_AI_REPLIES = [
-    "Hello! Thanks for your message. Raphael has received it and will get back to you soon.",
-    "Hi there! Raphael has seen your message and will reply shortly. Thank you!",
-    "Got it! Thanks for reaching out. Raphael will respond as soon as possible.",
-    "Message received. Raphael will get back to you shortly. Have a great day!"
+    "Hello! Thanks for your message. Raphael's Assistant has received it and will get back to you soon.",
+    "Hi there! Raphael's Assistant has seen your message and will reply shortly. Thank you!",
+    "Got it! Thanks for reaching out. Raphael's Assistant will respond as soon as possible.",
+    "Message received. Raphael's Assistant will get back to you shortly. Have a great day!"
 ]
