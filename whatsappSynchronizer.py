@@ -5,22 +5,21 @@ import utility
 import random
 import api_client as db
 import selenium_handler as sh
-import config
+import config  # Import the new configuration file
 
 utility.install_missing_libs()
 
 from tqdm import tqdm
+from selenium.webdriver.support import expected_conditions as EC
 from api_routes import app
 
-
-
-
 # ==============================================================================
-# --- MAIN WORKFLOW FUNCTIONS ---
+# --- WORKER FUNCTIONS ---
+# These are the individual tasks that the scheduler will run.
 # ==============================================================================
 
 def run_api_server(whatsapp_name):
-    
+    """Function to run the Flask API server in a separate thread."""
     print("🚀 Starting API server on http://127.0.0.1:5001...")
     app.config['YOUR_WHATSAPP_NAME'] = whatsapp_name
     import logging
@@ -28,9 +27,11 @@ def run_api_server(whatsapp_name):
     log.setLevel(logging.ERROR)
     app.run(port=5001)
 
-
 def process_unreplied_queue():
-    
+    """
+    Checks DB for unreplied messages and triggers the API to send a reply for each.
+    This function is self-contained and does not need a browser instance.
+    """
     print("   Checking database for unreplied messages...")
     try:
         unreplied_convos = db.get_all_unreplied_conversations()
@@ -52,15 +53,17 @@ def process_unreplied_queue():
             
             db.send_message_via_api(number, reply_text)
             
-            time.sleep(30) 
+            time.sleep(config.REPLY_API_TASK_DELAY_SECONDS) 
             
         print("   ✅ Finished processing unreplied queue.")
-
     except Exception as e:
         print(f"\n   ❌ An error occurred during queue processing: {e}")
 
-
 def run_sync_task():
+    """
+    Opens a browser, syncs all unread messages, and then closes the browser,
+    releasing the profile lock for other tasks.
+    """
     driver = None
     try:
         driver = sh.open_whatsapp()
@@ -86,8 +89,6 @@ def run_sync_task():
                 processed_in_batch.add(number if number else name)
                 last_msg = db.get_last_message_from_db(number, name, config.YOUR_WHATSAPP_NAME)
                 new_data = sh.smart_scroll_and_collect(driver, stop_at_last=last_msg)
-                
-                
                 db.save_messages_to_db(name, number, new_data)
                 sh.close_current_chat(driver)
             
@@ -97,42 +98,64 @@ def run_sync_task():
             print("   ✔️ No unread chats found in UI.")
             try: unread_button.click()
             except: pass
-            
     finally:
         if driver:
             print("   Closing sync browser to release profile lock.")
             driver.quit()
 
-def monitor_sync_and_reply():
+# ==============================================================================
+# --- NEW PARALLEL TASK SCHEDULER ---
+# ==============================================================================
+
+def run_parallel_tasks():
     """
-    Runs a continuous loop that coordinates the reply and sync tasks serially.
+    The main scheduler loop. It runs sync and reply tasks on independent timers,
+    giving the appearance of parallel execution while safely managing the
+    single browser profile resource.
     """
-    print("\n--- Starting Continuous Monitor, Sync, and Reply (Press Ctrl+C to stop) ---")
+    print("\n--- 🤖 Starting Parallel Bot Operations (Press Ctrl+C to stop) ---")
+    print(f"    - Syncing new messages every {config.SYNC_INTERVAL_SECONDS} seconds.")
+    print(f"    - Replying to messages every {config.REPLY_INTERVAL_SECONDS} seconds.")
+    
+    last_sync_time = 0
+    last_reply_time = 0
+
     try:
-        # --- PHASE 1: PRE-SYNC REPLY ---
-        # print("\n--- [Phase 1 of 3] Processing any existing unreplied messages ---")
-        # process_unreplied_queue()
         while True:
-            # --- PHASE 2: SYNC FROM UI ---
-            print("\n--- [Phase 2 of 3] Starting sync task for new messages ---")
-            run_sync_task()
-            
-            # # --- PHASE 3: POST-SYNC REPLY ---
-            # print("\n--- [Phase 3 of 3] Processing any newly synced unreplied messages ---")
-            # process_unreplied_queue()
-            
-            print("\n--- Cycle Complete ---")
-            print("...waiting 60 seconds before next cycle...")
-            time.sleep(60)
+            now = time.time()
 
+            
+
+            # --- Check if it's time to run the SYNC task ---
+            if (now - last_sync_time) > config.SYNC_INTERVAL_SECONDS:
+                print("\n" + "─"*15 + " [SYNC TASK TRIGGERED] " + "─"*16)
+                run_sync_task()
+                last_sync_time = now # Reset timer after task runs
+                print("─"*15 + " [SYNC TASK COMPLETE] " + "─"*17)
+
+            # A short sleep to prevent the loop from consuming 100% CPU
+
+            # --- Check if it's time to run the REPLY task ---
+            if (now - last_reply_time) > config.REPLY_INTERVAL_SECONDS:
+                print("\n" + "─"*15 + " [REPLY TASK TRIGGERED] " + "─"*15)
+                process_unreplied_queue()
+                last_reply_time = now # Reset timer after task runs
+                print("─"*15 + " [REPLY TASK COMPLETE] " + "─"*16)
+
+            time.sleep(5)
+            
+            
     except KeyboardInterrupt:
-        print("\n🛑 Monitoring stopped.")
+        print("\n🛑 Bot operations stopped by user.")
 
+# ==============================================================================
+# --- UTILITY AND MENU FUNCTIONS ---
+# ==============================================================================
 
 def run_full_update(driver):
+    """Performs a one-time, full scan of all contacts to build the database."""
     print("\n--- Starting Full Database Update ---")
     contacts_to_process = sh.get_all_contacts(driver)
-    print(f"📋 Found {len(contacts_to_process)} contacts to process.")
     processed_this_session = set()
     for contact_name in tqdm(contacts_to_process, desc="📂 Processing contacts", unit="contact"):
         name, number = sh.open_chat(driver, contact_name, processed_this_session)
@@ -147,6 +170,7 @@ def run_full_update(driver):
     print("\n🎉 Full update complete!")
 
 def run_api_tools():
+    """Provides a command-line interface for interacting with the database via API."""
     while True:
         print("\n" + "-"*20 + " Database API Tools " + "-"*20)
         print("1. Get conversation summary by title")
@@ -168,24 +192,19 @@ def run_api_tools():
             conversations = db.get_all_unreplied_conversations()
             print("\n--- Unreplied Conversations ---")
             for conv in conversations: print(f"  - {conv['title']} ({conv.get('phone_number', 'N/A')}) | Last updated: {conv['updated'][:16]}")
-        
         elif choice == '4':
             print("\nThis tool will send a request to the API server to perform a full")
             print("'Sync & Send' operation in a new, dedicated browser session.")
-            
             number = input("Enter the full phone number WITH country code (e.g., +880123...): ")
             if not number.startswith('+'):
                 print("\n❌ FORMAT ERROR: The phone number must start with a '+' and country code.")
                 continue
-
             text = input("Enter the message text to send: ")
             if not text:
                 print("❌ ERROR: The message text cannot be empty.")
                 continue
-
             db.send_message_via_api(number, text)
             time.sleep(2) 
-
         elif choice == '5':
             break
         else:
@@ -197,20 +216,22 @@ def run_api_tools():
 if __name__ == "__main__":
     api_thread = threading.Thread(target=run_api_server, args=(config.YOUR_WHATSAPP_NAME,), daemon=True)
     api_thread.start()
-    time.sleep(2)
+    time.sleep(2) # Give the API server time to initialize
 
     db.init_db()
     
     while True:
         print("\n" + "="*40 + "\n       WhatsApp Automation Menu\n" + "="*40)
-        print("1. Update Database (Full Scan)")
-        print("2. Monitor, Sync")
-        print("3. Reply Unreplied Messages")
-        print("4. Database API Tools")
-        print("5. Exit")
-        choice = input("Enter your choice (1/2/3/4/5): ").strip()
+        print("1. Start Bot (Continuous Sync & Reply)")
+        print("2. Update Database (One-Time Full Scan)")
+        print("3. Database API Tools")
+        print("4. Exit")
+        choice = input("Enter your choice (1-4): ").strip()
         
-        if choice == '1': 
+        if choice == '1':
+            run_parallel_tasks()
+        
+        elif choice == '2': 
             driver = None
             try:
                 driver = sh.open_whatsapp()
@@ -219,13 +240,10 @@ if __name__ == "__main__":
                 if driver:
                     driver.quit()
         
-        elif choice == '2': 
-            monitor_sync_and_reply()
-        elif choice == '3': 
-            process_unreplied_queue()
-        elif choice == '4': 
+        elif choice == '3':
             run_api_tools()
-        elif choice == '5': 
+
+        elif choice == '4': 
             print("👋 Exiting program."); break
         else: 
             print("❌ Invalid choice.")
