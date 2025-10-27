@@ -16,3 +16,4 @@ read.py
 __pycache__/
 botDB.py
 venv/
+run_server.py

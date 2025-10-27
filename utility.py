@@ -6,7 +6,6 @@ required_libs = {
     "selenium": "selenium",
     "webdriver-manager": "webdriver_manager",
     "tqdm": "tqdm",
-    "google-generativeai": "google.generativeai",
     "Flask": "flask",
     "requests": "requests",
     "pyperclip": "pyperclip"
