@@ -4,8 +4,6 @@
 # --- CORE SETTINGS ---
 # ==============================================================================
 
-# Your full WhatsApp name as it appears in the app.
-# This is crucial for correctly identifying messages sent by you.
 YOUR_WHATSAPP_NAME = "AHBAB SAKALAN"
 
 
@@ -13,8 +11,6 @@ YOUR_WHATSAPP_NAME = "AHBAB SAKALAN"
 # --- BOT BEHAVIOR SETTINGS ---
 # ==============================================================================
 
-# A list of generic replies the bot can send.
-# When a reply is needed, a random message from this list will be chosen.
 SIMULATED_AI_REPLIES = [
     "Hello! Thanks for your message. Ahbab has received it and will get back to you soon.",
     "Hi there! Ahbab has seen your message and will reply shortly. Thank you!",
