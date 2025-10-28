@@ -156,10 +156,21 @@ def get_last_messages(title, count=5):
     return reversed(messages)
 
 def get_all_unreplied_conversations():
+    """
+    Retrieves conversations where the last message is from a 'user'.
+    Crucially, it now fetches the actual 'sending_date' of that last message
+    for accurate age-checking.
+    """
     conn = get_db_connection()
     cursor = conn.cursor()
+    
+    # --- MODIFIED QUERY: Fetches the actual sending_date of the last message ---
     cursor.execute("""
-        SELECT c.title, c.phone_number, c.updated FROM Conversations c
+        SELECT 
+            c.title, 
+            c.phone_number, 
+            (SELECT m.sending_date FROM Messages m WHERE m.conversation_id = c.id ORDER BY m.message_index DESC LIMIT 1) as last_message_date
+        FROM Conversations c
         WHERE (SELECT m.role FROM Messages m WHERE m.conversation_id = c.id ORDER BY m.message_index DESC LIMIT 1) = 'user'
     """)
     conversations = cursor.fetchall()

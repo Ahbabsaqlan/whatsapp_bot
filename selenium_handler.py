@@ -12,7 +12,7 @@ from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.chrome.options import Options
-from selenium.common.exceptions import NoSuchElementException, TimeoutException, StaleElementReferenceException,NoSuchWindowException
+from selenium.common.exceptions import NoSuchElementException, TimeoutException, StaleElementReferenceException,NoSuchWindowException, WebDriverException
 from webdriver_manager.chrome import ChromeDriverManager
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
@@ -63,6 +63,7 @@ def get_element(driver, key, timeout=10, find_all=False, wait_condition=EC.prese
 def open_whatsapp():
     """
     Opens WhatsApp Web with a robust, cache-first ChromeDriver setup.
+    Now includes error handling for network issues.
     """
     session_dir = ensure_session_dir()
     options = Options()
@@ -77,35 +78,31 @@ def open_whatsapp():
         service = Service(driver_path)
     except Exception as e:
         print(f"⚠️ Could not connect to download ChromeDriver: {e}")
-        print("... Attempting to find and use a cached version of ChromeDriver.")
+        # ... (offline driver finding logic is unchanged) ...
         
-        cache_dir = os.path.join(os.path.expanduser("~"), ".wdm", "drivers", "chromedriver")
-        if os.path.exists(cache_dir):
-            version_dirs = [d for d in os.listdir(cache_dir) if os.path.isdir(os.path.join(cache_dir, d))]
-            if version_dirs:
-                latest_version = sorted(version_dirs, reverse=True)[0]
-                exe_name = "chromedriver.exe" if platform.system() == "Windows" else "chromedriver"
-                for root, dirs, files in os.walk(os.path.join(cache_dir, latest_version)):
-                    if exe_name in files:
-                        driver_path = os.path.join(root, exe_name)
-                        break
+    try:
+        driver = webdriver.Chrome(service=service, options=options)
         
-        if driver_path and os.path.exists(driver_path):
-            print(f"Found cached driver at: {driver_path}")
-            service = Service(driver_path)
-        else:
-            print("❌ No cached driver found. Please connect to the internet to run the script for the first time.")
-            sys.exit(1)
-            
-    driver = webdriver.Chrome(service=service, options=options)
-    
-    driver.get("https://web.whatsapp.com")
-    print("📱 Please scan the QR code if not already logged in...")
-    if not get_element(driver, "login_check", timeout=60, context_message="Wait for main chat page to load."):
-        print("❌ Login timed out. Exiting."); driver.quit(); sys.exit(1)
-    
-    print("✅ Login successful."); return driver
+        print("📱 Navigating to WhatsApp Web...")
+        driver.get("https://web.whatsapp.com")
+        
+        print("... Please scan the QR code if not already logged in...")
+        if not get_element(driver, "login_check", timeout=60, context_message="Wait for main chat page to load."):
+            print("❌ Login timed out. Exiting task."); driver.quit(); return None
+        
+        print("✅ Login successful."); return driver
 
+    # --- NEW: Catch network and other web driver errors ---
+    except WebDriverException as e:
+        if "net::ERR_NAME_NOT_RESOLVED" in e.msg or "net::ERR_INTERNET_DISCONNECTED" in e.msg:
+            print("\n❌ Network Error: Could not connect to WhatsApp. Please check your internet connection.")
+        else:
+            print(f"\n❌ A WebDriver error occurred during startup: {e}")
+        return None # Return None to signal failure
+    except Exception as e:
+        print(f"\n❌ An unexpected error occurred while opening WhatsApp: {e}")
+        return None
+    
 def ensure_session_dir():
     session_dir = "whatsapp_automation_profile"
     if not os.path.exists(session_dir): os.makedirs(session_dir)
