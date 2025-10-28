@@ -18,6 +18,7 @@ The system operates in distinct modes: a **Continuous Bot** for parallel syncing
 | Store Conversations Locally in SQLite | ✅ Done |
 | Send Automated, Human-like Replies | ✅ Done |
 | REST API for Programmatic Control | ✅ Done |
+| All features in the form functions for integration with any other system(`controller.py`) | ✅ Done |
 | Read and Store Received Images | ⚠️ Incomplete |
 
 ### Advanced Capabilities
