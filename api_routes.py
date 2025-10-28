@@ -14,54 +14,68 @@ def send_message_endpoint():
     text = data.get('text')
     if not phone_number or not text:
         return jsonify({"status": "error", "message": "Missing 'phone_number' or 'text'"}), 400
+
     your_name = current_app.config.get('YOUR_WHATSAPP_NAME')
-    if not your_name:
-         return jsonify({"status": "error", "message": "Server is not configured with YOUR_WHATSAPP_NAME"}), 500
-    task_thread = threading.Thread(target=sync_and_send_worker, args=(phone_number, text, your_name))
+    task_lock = current_app.config.get('TASK_LOCK') # Get the lock from the app config
+    if not your_name or not task_lock:
+         return jsonify({"status": "error", "message": "Server is not configured correctly (missing name or lock)."}), 500
+
+    # Pass the lock to the worker thread
+    task_thread = threading.Thread(target=sync_and_send_worker, args=(phone_number, text, your_name, task_lock))
     task_thread.start()
     return jsonify({"status": "success", "message": "Message sending task has been initiated."}), 202
 
-def sync_and_send_worker(number, text, your_name):
-    print(f"\n--- [API Task Started] ---")
-    print(f"  - Target: {number}")
-    print(f"  - Message: '{text[:30]}...'")
-    driver = None
-    try:
-        contact_info = db.get_contact_details_by_phone(number)
-        # This now works correctly because the DB function returns 'last_meta_text'
-        last_msg_bookmark = contact_info.get("last_meta_text") if contact_info else None
-        
-        driver = sh.open_whatsapp()
-        sanitized_number = ''.join(filter(str.isdigit, number))
-        driver.get(f"https://web.whatsapp.com/send?phone={sanitized_number}")
+# --- THIS IS THE MODIFIED WORKER FUNCTION ---
+def sync_and_send_worker(number, text, your_name, lock):
+    """
+    This worker now acquires a lock to ensure it has exclusive access to the
+    browser profile, pausing any scheduled tasks.
+    """
+    print(f"\n--- [API Task Started for {number}] ---")
+    print("   Attempting to acquire lock for exclusive browser access...")
+    
+    with lock: # This will wait until the lock is free, then acquire it
+        print("   ✅ Lock acquired. Starting browser operation.")
+        driver = None
+        try:
+            contact_info = db.get_contact_details_by_phone(number)
+            last_msg_bookmark = contact_info.get("last_meta_text") if contact_info else None
+            
+            driver = sh.open_whatsapp()
+            if not driver: # Handle startup failure (e.g., network error)
+                raise Exception("Failed to open WhatsApp. The task will be aborted.")
 
-        if not sh.get_element(driver, "reply_message_box", timeout=20):
-            raise Exception(f"The number '{number}' might be invalid or not on WhatsApp.")
-        
-        actual_name, _ = sh.get_details_from_header(driver)
-        unread_messages = sh.smart_scroll_and_collect(driver, stop_at_last=last_msg_bookmark)
-        if unread_messages:
-            print(f"   - Synced {len(unread_messages)} new message(s).")
-        
-        print("   - Sending reply...")
-        sh.send_reply(driver, text)
-        time.sleep(2)
-        new_bookmark = unread_messages[-1]['meta_text'] if unread_messages else last_msg_bookmark
-        sent_message_data = sh.smart_scroll_and_collect(driver, stop_at_last=new_bookmark)
-        
-        all_messages_to_save = unread_messages + sent_message_data
-        if all_messages_to_save:
-            db.save_messages_to_db(actual_name, number, all_messages_to_save)
-            print(f"   - Saved {len(all_messages_to_save)} total messages to the database.")
-        
-        print(f"--- [API Task for {number} Finished Successfully] ---")
-    except Exception as e:
-        print(f"--- [API Task for {number} FAILED] ---")
-        print(f"   - Error: {e}")
-    finally:
-        if driver:
-            print("   - Closing API browser session.")
-            driver.quit()
+            sanitized_number = ''.join(filter(str.isdigit, number))
+            driver.get(f"https://web.whatsapp.com/send?phone={sanitized_number}")
+
+            if not sh.get_element(driver, "reply_message_box", timeout=20):
+                raise Exception(f"The number '{number}' might be invalid or not on WhatsApp.")
+            
+            actual_name, _ = sh.get_details_from_header(driver)
+            unread_messages = sh.smart_scroll_and_collect(driver, stop_at_last=last_msg_bookmark)
+            if unread_messages:
+                print(f"   - Synced {len(unread_messages)} new message(s).")
+            
+            print("   - Sending reply...")
+            sh.send_reply(driver, text)
+            
+            new_bookmark = unread_messages[-1]['meta_text'] if unread_messages else last_msg_bookmark
+            sent_message_data = sh.smart_scroll_and_collect(driver, stop_at_last=new_bookmark)
+            
+            all_messages_to_save = unread_messages + sent_message_data
+            if all_messages_to_save:
+                db.save_messages_to_db(actual_name, number, all_messages_to_save)
+            
+            print(f"--- [API Task for {number} Finished Successfully] ---")
+
+        except Exception as e:
+            print(f"--- [API Task for {number} FAILED] ---")
+            print(f"   - Error: {e}")
+        finally:
+            if driver:
+                print("   - Closing API browser session.")
+                driver.quit()
+            print("   Releasing lock.")
 
 @app.route('/messages', methods=['POST'])
 def save_messages_route():
