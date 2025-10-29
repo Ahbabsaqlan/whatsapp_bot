@@ -233,12 +233,15 @@ if __name__ == "__main__":
     
     while True:
         print("\n" + "="*40 + "\n       WhatsApp Automation Menu\n" + "="*40)
-        print("1. Start Bot (Continuous Sync & Reply)")
+        print("0. Start Bot (Continuous Sync)")
+        print("1. Start Bot (Continuous Sync & Auto-Reply)")
         print("2. Update Database (One-Time Full Scan)")
         print("3. Database API Tools")
         print("4. Exit")
         choice = input("Enter your choice (1-4): ").strip()
         
+        # if choice == '0':
+        #     run_parallel_tasks()  takes in parameter to not send auto reply
         if choice == '1':
             run_parallel_tasks()
         
