@@ -6,12 +6,11 @@ import threading
 import random
 import controller as db
 import selenium_handler as sh
-import config 
-from datetime import datetime, timedelta 
+import config
+from datetime import datetime, timedelta
 
 
 from tqdm import tqdm
-from selenium.webdriver.support import expected_conditions as EC
 from api_routes import app
 
 TASK_LOCK = threading.Lock()
@@ -120,7 +119,7 @@ def run_sync_task():
 # --- NEW PARALLEL TASK SCHEDULER ---
 # ==============================================================================
 
-def run_parallel_tasks():
+def run_parallel_tasks(only_sync=False):
     """
     The main scheduler loop. It runs sync and reply tasks on independent timers,
     giving the appearance of parallel execution while safely managing the
@@ -143,15 +142,13 @@ def run_parallel_tasks():
                 run_sync_task()
                 last_sync_time = now # Reset timer after task runs
                 print("─"*15 + " [SYNC TASK COMPLETE] " + "─"*17)
-
-            # --- Check if it's time to run the REPLY task ---
-            if (now - last_reply_time) > config.REPLY_INTERVAL_SECONDS:
-                print("\n" + "─"*15 + " [REPLY TASK TRIGGERED] " + "─"*15)
-                process_unreplied_queue()
-                last_reply_time = now # Reset timer after task runs
-                print("─"*15 + " [REPLY TASK COMPLETE] " + "─"*16)
-
-
+            if not only_sync:
+                # --- Check if it's time to run the REPLY task ---
+                if (now - last_reply_time) > config.REPLY_INTERVAL_SECONDS:
+                    print("\n" + "─"*15 + " [REPLY TASK TRIGGERED] " + "─"*15)
+                    process_unreplied_queue()
+                    last_reply_time = now # Reset timer after task runs
+                    print("─"*15 + " [REPLY TASK COMPLETE] " + "─"*16)
             # A short sleep to prevent the loop from consuming 100% CPU
             time.sleep(5)
             
@@ -238,12 +235,12 @@ if __name__ == "__main__":
         print("2. Update Database (One-Time Full Scan)")
         print("3. Database API Tools")
         print("4. Exit")
-        choice = input("Enter your choice (1-4): ").strip()
+        choice = input("Enter your choice (0-4): ").strip()
         
-        # if choice == '0':
-        #     run_parallel_tasks()  takes in parameter to not send auto reply
-        if choice == '1':
-            run_parallel_tasks()
+        if choice == '0':
+            run_parallel_tasks(True)
+        elif choice == '1':
+            run_parallel_tasks(False)
         
         elif choice == '2': 
             driver = None
