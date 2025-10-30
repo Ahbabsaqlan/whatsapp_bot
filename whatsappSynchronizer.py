@@ -93,9 +93,9 @@ def run_sync_task():
             
             unread_contacts_snapshot = sh.get_all_contacts(driver)
             if unread_contacts_snapshot:
-                # ... (rest of the sync logic is unchanged) ...
                 processed_in_batch = set()
                 for contact_name in unread_contacts_snapshot:
+                    if contact_name == "WhatsApp": continue
                     if contact_name in processed_in_batch: continue
                     name, number = sh.open_chat(driver, contact_name, processed_in_batch)
                     if not name: continue
