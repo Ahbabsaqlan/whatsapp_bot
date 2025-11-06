@@ -12,59 +12,62 @@ def send_message_endpoint():
     data = request.json
     phone_number = data.get('phone_number')
     text = data.get('text')
-    if not phone_number or not text:
-        return jsonify({"status": "error", "message": "Missing 'phone_number' or 'text'"}), 400
+    file_path = data.get('file_path') # <-- Get the new parameter
+
+    # A message must have either text or a file
+    if not phone_number or (not text and not file_path):
+        return jsonify({"status": "error", "message": "Request must include 'phone_number' and either 'text' or 'file_path'"}), 400
 
     your_name = current_app.config.get('YOUR_WHATSAPP_NAME')
-    task_lock = current_app.config.get('TASK_LOCK') # Get the lock from the app config
+    task_lock = current_app.config.get('TASK_LOCK')
     if not your_name or not task_lock:
-         return jsonify({"status": "error", "message": "Server is not configured correctly (missing name or lock)."}), 500
+         return jsonify({"status": "error", "message": "Server is not configured correctly."}), 500
 
-    # Pass the lock to the worker thread
-    task_thread = threading.Thread(target=sync_and_send_worker, args=(phone_number, text, your_name, task_lock))
+    # Pass all relevant data to the worker thread
+    task_thread = threading.Thread(target=sync_and_send_worker, args=(phone_number, text, file_path, your_name, task_lock))
     task_thread.start()
     return jsonify({"status": "success", "message": "Message sending task has been initiated."}), 202
 
-# --- THIS IS THE MODIFIED WORKER FUNCTION ---
-def sync_and_send_worker(number, text, your_name, lock):
+# --- MODIFIED WORKER FUNCTION ---
+def sync_and_send_worker(number, text, file_path, your_name, lock):
     """
-    This worker now acquires a lock to ensure it has exclusive access to the
-    browser profile, pausing any scheduled tasks.
+    Worker function that now handles sending either a text message or a file with a caption.
     """
     print(f"\n--- [API Task Started for {number}] ---")
     print("   Attempting to acquire lock for exclusive browser access...")
     
-    with lock: # This will wait until the lock is free, then acquire it
+    with lock:
         print("   ✅ Lock acquired. Starting browser operation.")
         driver = None
         try:
-            contact_info = db.get_contact_details_by_phone(number)
-            last_msg_bookmark = contact_info.get("last_meta_text") if contact_info else None
+            # Syncing logic is now only relevant if we are replying to an existing chat.
+            # For sending a new message, we can simplify.
             
             driver = sh.open_whatsapp()
-            if not driver: # Handle startup failure (e.g., network error)
+            if not driver:
                 raise Exception("Failed to open WhatsApp. The task will be aborted.")
 
             sanitized_number = ''.join(filter(str.isdigit, number))
             driver.get(f"https://web.whatsapp.com/send?phone={sanitized_number}")
+            
+            # Wait for chat to be ready before proceeding
+            if not sh.get_element(driver, "reply_message_box", timeout=20, context_message=f"Wait for chat with {number} to open."):
+                raise Exception(f"Could not open chat with '{number}'. It might be an invalid number.")
 
-            if not sh.get_element(driver, "reply_message_box", timeout=20):
-                raise Exception(f"The number '{number}' might be invalid or not on WhatsApp.")
+            # --- NEW LOGIC: Decide whether to send a file or text ---
+            if file_path:
+                # If a file path is provided, send the file with 'text' as the caption
+                sh.send_file_with_caption(driver, file_path, caption=text)
+            elif text:
+                # Otherwise, send a normal text message
+                sh.send_reply(driver, text)
             
+            # After sending, we can do a quick scrape to log the sent message
             actual_name, _ = sh.get_details_from_header(driver)
-            unread_messages = sh.smart_scroll_and_collect(driver, stop_at_last=last_msg_bookmark)
-            if unread_messages:
-                print(f"   - Synced {len(unread_messages)} new message(s).")
-            
-            print("   - Sending reply...")
-            sh.send_reply(driver, text)
-            
-            new_bookmark = unread_messages[-1]['meta_text'] if unread_messages else last_msg_bookmark
-            sent_message_data = sh.smart_scroll_and_collect(driver, stop_at_last=new_bookmark)
-            
-            all_messages_to_save = unread_messages + sent_message_data
-            if all_messages_to_save:
-                db.save_messages_to_db(actual_name, number, all_messages_to_save)
+            last_msg = db.get_last_message_from_db(number, actual_name, your_name)
+            sent_message_data = sh.smart_scroll_and_collect(driver, stop_at_last=last_msg)
+            if sent_message_data:
+                db.save_messages_to_db(actual_name, number, sent_message_data)
             
             print(f"--- [API Task for {number} Finished Successfully] ---")
 

@@ -23,5 +23,10 @@
   "reply_message_box": "//div[@contenteditable='true'][@data-tab='10']",
   "unread_filter_button": "//*[@id='unread-filter']",
   "chat_menu_button": "//*[@id='main']/header/div[3]/div/div[2]/div/span/div/div",
-  "chat_close_option": "//li[@role='button']//span[text()='Close chat']"
+  "chat_close_option": "//li[@role='button']//span[text()='Close chat']",
+
+  "attach_button": "//div[@aria-label='Attach']",
+  "attach_document_option": "//span[text()='Document']/ancestor::li//input[@type='file']",
+  "caption_input": "//div[@contenteditable='true'][@data-tab='10']",
+  "send_file_button": "//div[@aria-label='Send']"
 }

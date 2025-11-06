@@ -62,14 +62,19 @@ def get_contact_details(phone_number):
         print(f"❌ API Error: Could not get contact details. Error: {e}")
         return None
 
-def send_message_via_api(phone_number, text):
+def send_message_via_api(phone_number, text=None, file_path=None):
     """
-    Calls the main API endpoint to trigger a full, independent send process.
+    Calls the main API endpoint to trigger a send process for either text or a file.
     """
+    if not text and not file_path:
+        print("❌ Error: You must provide either text or a file_path to send.")
+        return False
+
     try:
         payload = {
             "phone_number": phone_number,
-            "text": text
+            "text": text,         # Will be used as caption if file_path is present
+            "file_path": file_path
         }
         response = requests.post(f"{API_BASE_URL}/send-message", json=payload, timeout=10)
         
@@ -82,7 +87,7 @@ def send_message_via_api(phone_number, text):
         return True
 
     except requests.exceptions.RequestException as e:
-        print(f"\n❌ API Connection Error: Could not connect to the server to send the message.")
+        print(f"\n❌ API Connection Error: Could not connect to the server.")
         print(f"   Please ensure the main script is running. Error: {e}")
         return False
 

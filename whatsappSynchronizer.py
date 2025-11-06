@@ -9,6 +9,7 @@ import selenium_handler as sh
 import config
 from datetime import datetime, timedelta
 import ai_manager as ai  # Import the new AI manager
+import os
 
 from tqdm import tqdm
 from selenium.webdriver.support import expected_conditions as EC
@@ -191,7 +192,7 @@ def run_api_tools():
         print("1. Get conversation summary by title")
         print("2. Get last messages from a conversation")
         print("3. List all unreplied conversations")
-        print("4. Send Manual Reply via API")
+        print("4. Send Manual Message / File via API")
         print("5. Back to Main Menu")
         choice = input("Enter your choice: ").strip()
 
@@ -208,18 +209,33 @@ def run_api_tools():
             print("\n--- Unreplied Conversations ---")
             for conv in conversations: print(f"  - {conv['title']} ({conv.get('phone_number', 'N/A')}) | Last message: {conv.get('last_message_date', 'N/A')[:16]}")
         elif choice == '4':
-            print("\nThis tool will send a request to the API server to perform a full")
-            print("'Sync & Send' operation in a new, dedicated browser session.")
+            print("\nThis tool can send a text message, or a file with an optional caption.")
+            
             number = input("Enter the full phone number WITH country code (e.g., +880123...): ")
             if not number.startswith('+'):
                 print("\n❌ FORMAT ERROR: The phone number must start with a '+' and country code.")
                 continue
-            text = input("Enter the message text to send: ")
-            if not text:
-                print("❌ ERROR: The message text cannot be empty.")
-                continue
-            db.send_message_via_api(number, text)
+
+            file_path = input("Enter the FULL path to the file (or press Enter to skip): ").strip()
+            text = None
+            
+            if file_path:
+                if not os.path.exists(file_path):
+                    print(f"❌ FILE NOT FOUND at '{file_path}'. Aborting.")
+                    continue
+                # If there's a file, the text becomes an optional caption
+                text = input("Enter an optional caption for the file (or press Enter to skip): ").strip()
+            else:
+                # If there's no file, the text is a required message
+                text = input("Enter the message text to send: ").strip()
+                if not text:
+                    print("❌ ERROR: You must provide a message if not sending a file.")
+                    continue
+
+            # Call the updated API client function
+            db.send_message_via_api(number, text=text, file_path=file_path)
             time.sleep(2) 
+
         elif choice == '5':
             break
         else:

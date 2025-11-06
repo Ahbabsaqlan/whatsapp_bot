@@ -60,6 +60,7 @@ def get_element(driver, key, timeout=10, find_all=False, wait_condition=EC.prese
         if not suppress_error: print(f"⚠️ Warning: Element for selector key '{key}' became stale.")
         return [] if find_all else None
 
+
 def open_whatsapp():
     """
     Opens WhatsApp Web with a robust, cache-first ChromeDriver setup.
@@ -102,7 +103,8 @@ def open_whatsapp():
     except Exception as e:
         print(f"\n❌ An unexpected error occurred while opening WhatsApp: {e}")
         return None
-    
+
+
 def ensure_session_dir():
     session_dir = "whatsapp_automation_profile"
     if not os.path.exists(session_dir): os.makedirs(session_dir)
@@ -195,6 +197,7 @@ def get_all_contacts(driver):
 
     print(f"--- Finished contact scraping. Total entries found: {len(contacts_list)} ---")
     return contacts_list
+
 
 def open_chat(driver, contact_name, processed_items, retries=3):
     """Modified to use clipboard for searching, ensuring emoji compatibility."""
@@ -478,6 +481,65 @@ def send_reply(driver, reply_text):
     message_box.send_keys(Keys.ENTER)
     print(f"💬 Replied to chat.")
     time.sleep(1)
+
+
+def send_file_with_caption(driver, file_path, caption=None):
+    """
+    Attaches a file and sends it with an optional caption.
+    This bypasses the OS file dialog for maximum reliability.
+    """
+    # 1. Sanity check: ensure the file exists before we start
+    if not os.path.isabs(file_path):
+        file_path = os.path.abspath(file_path)
+    if not os.path.exists(file_path):
+        print(f"❌ File not found at path: {file_path}")
+        return False
+
+    try:
+        # 2. Click the attach button
+        attach_btn = get_element(driver, "attach_button", timeout=10)
+        if not attach_btn:
+            print("❌ Could not find the 'Attach' button.")
+            return False
+        attach_btn.click()
+        time.sleep(1)
+
+        # 3. Find the hidden file input and send the absolute file path to it
+        # This is the magic step that avoids the OS dialog.
+        file_input = get_element(driver, "attach_document_option", timeout=5)
+        if not file_input:
+            print("❌ Could not find the file input element for documents.")
+            return False
+        
+        print(f"   📎 Attaching file: {file_path}")
+        file_input.send_keys(file_path)
+        
+        # 4. Wait for the file preview screen and type the caption if provided
+        caption_box = get_element(driver, "caption_input", timeout=15, context_message="Wait for file preview screen to load.")
+        if not caption_box:
+            print("❌ Timed out waiting for file preview screen.")
+            return False
+            
+        if caption:
+            print(f"   ✍️ Adding caption: '{caption[:30]}...'")
+            caption_box.click()
+            caption_box.send_keys(caption)
+        
+        # 5. Find and click the final send button
+        send_btn = get_element(driver, "send_file_button", timeout=10)
+        if not send_btn:
+            print("❌ Could not find the final 'Send' button.")
+            return False
+        
+        send_btn.click()
+        print("   ✅ File sent successfully.")
+        time.sleep(3) # Wait a moment for the send animation to complete
+        return True
+
+    except Exception as e:
+        print(f"❌ An error occurred during file sending: {e}")
+        return False
+    
 
 
 def close_current_chat(driver):
