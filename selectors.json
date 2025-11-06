@@ -9,9 +9,12 @@
   "contact_info_phone_number": "header:has(div[title='Contact info']) + div span.selectable-text.copyable-text[dir='auto'] div",
   "contact_info_phone_number_business": "//div[.//span[contains(., 'About and phone number')]]/following-sibling::div[last()]//span/span",
   "body_tag_name": "body",
+
   "chat_container": "div#main div.copyable-area div[tabindex='0']",
   "load_older_messages_button": "//button[.//div[contains(text(), 'Click here to get older messages from your phone.')]]",
   "all_messages": "div.message-in, div.message-out",
+
+
   "message_meta_data": "div[data-pre-plain-text]",
   "message_image": ".//div[@role='button' and @aria-label='Open picture']",
   "message_voice": ".//button[@aria-label='Play voice message']",
@@ -20,6 +23,24 @@
   "message_sticker": ".//img[contains(@style, 'width') and contains(@style, 'height')]",
   "message_text_content": "span.selectable-text",
   "message_forwarded": ".//span[contains(text(), 'Forwarded')]",
+
+  "message_meta_div": "div.copyable-text",
+  "message_sender_aria_label": ".//span[@aria-label]",
+  "message_timestamp_span": ".//span[@dir='auto' and contains(@class, 'x16dsc37')]",
+  
+  "message_text_span": ".//span[contains(@class, 'selectable-text')]",
+  "message_image_container": ".//div[@role='button' and @aria-label='Open picture']",
+  "message_video_container": ".//div[@role='button' and .//span[@data-icon='media-play']]",
+  "message_document_container": ".//div[@role='button' and starts-with(@title, 'Download')]",
+  "document_filename_span": ".//span[@dir='auto' and contains(@class, 'x13faqbe')]",
+  "message_voicenote_container": ".//button[@aria-label='Play voice message']",
+  "message_location_link": ".//a[contains(@href, 'maps.google.com')]",
+
+  "media_viewer_panel": "//div[@data-testid='media-viewer-content']",
+  "media_viewer_download_button": "//div[@aria-label='Media viewer']//span[@data-icon='download']",
+  "media_viewer_close_button": "//div[@aria-label='Media viewer']//span[@data-icon='x']",
+  "media_viewer_filename": "//div[@aria-label='Media viewer']//span[@aria-live='polite']",
+
   "reply_message_box": "//div[@contenteditable='true'][@data-tab='10']",
   "unread_filter_button": "//*[@id='unread-filter']",
   "chat_menu_button": "//*[@id='main']/header/div[3]/div/div[2]/div/span/div/div",
@@ -28,5 +49,10 @@
   "attach_button": "//div[@aria-label='Attach']",
   "attach_document_option": "//span[text()='Document']/ancestor::li//input[@type='file']",
   "caption_input": "//div[@contenteditable='true'][@data-tab='10']",
-  "send_file_button": "//div[@aria-label='Send']"
+  "send_file_button": "//div[@aria-label='Send']",
+
+  "message_image_or_video_container": ".//div[div[@role='button'] and .//img[@alt]]",
+  
+  "document_filename_in_chat": ".//span[@dir='auto' and @aria-label]"
+  
 }

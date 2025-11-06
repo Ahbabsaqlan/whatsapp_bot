@@ -21,6 +21,7 @@ def save_messages_to_db(contact_name, phone_number, new_messages):
         "contact_name": contact_name,
         "phone_number": phone_number,
         "new_messages": new_messages
+        # The 'your_name' parameter has been removed from the payload
     }
     try:
         response = requests.post(f"{API_BASE_URL}/messages", json=payload)

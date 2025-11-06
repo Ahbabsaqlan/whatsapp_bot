@@ -170,7 +170,7 @@ def run_parallel_tasks(only_sync=False):
 def run_full_update(driver):
     """Performs a one-time, full scan of all contacts to build the database."""
     print("\n--- Starting Full Database Update ---")
-    contacts_to_process = sh.get_all_contacts(driver)
+    contacts_to_process = ['Me😵‍💫']#['Me😵‍💫']sh.get_all_contacts(driver)
     processed_this_session = set()
     for contact_name in tqdm(contacts_to_process, desc="📂 Processing contacts", unit="contact"):
         if contact_name == "WhatsApp": continue
@@ -241,11 +241,117 @@ def run_api_tools():
         else:
             print("❌ Invalid choice.")
 
+
+def debug_ui_elements():
+    """
+    Opens a browser, scrapes the raw outerHTML of all 'message-in' and 'message-out'
+    elements, and writes the output directly to 'debug_output.txt'.
+    """
+    print("\n--- 🛠️ Starting UI Debugging Mode ---")
+    print("This mode will open a browser. Please navigate to the chat you want to inspect.")
+    
+    driver = None
+    try:
+        driver = sh.open_whatsapp()
+        if not driver:
+            print("❌ Could not open browser. Aborting debug session.")
+            return
+
+        # This input prompt gives you time to manually set up the browser state.
+        input("\n✅ Browser is open. Manually open the target chat, then press Enter here to continue...")
+
+        print("\nInspecting all visible message elements ('message-in' and 'message-out')...")
+        # Use the 'all_messages' selector key which corresponds to 'div.message-in, div.message-out'
+        elements = sh.get_element(driver, 'all_messages', timeout=10, find_all=True, suppress_error=True)
+
+        if not elements:
+            print("❌ No message elements were found on the screen.")
+            return
+
+        print(f"✅ Found {len(elements)} elements. Writing their HTML to debug_output.txt...")
+        
+        # Write the raw HTML output to a text file
+        output_filename = "debug_output.txt"
+        with open(output_filename, "w", encoding="utf-8") as f:
+            f.write(f"Raw HTML Dump of {len(elements)} Message Elements\n")
+            f.write("="*50 + "\n\n")
+
+            for i, element in enumerate(elements):
+                try:
+                    outer_html = element.get_attribute('outerHTML')
+                    f.write(f"--- Element {i+1} ---\n\n")
+                    f.write(outer_html)
+                    f.write("\n\n" + "="*50 + "\n\n")
+                except Exception as e:
+                    f.write(f"--- Element {i+1} ---\n\n")
+                    f.write(f"!!! ERROR: Could not retrieve HTML for this element. Reason: {e} !!!")
+                    f.write("\n\n" + "="*50 + "\n\n")
+
+        print(f"\n✅ Report complete! Please check the file: '{output_filename}'")
+        input("Press Enter to close the browser and exit debug mode.")
+
+    except Exception as e:
+        print(f"An error occurred during the debug session: {e}")
+    finally:
+        if driver:
+            driver.quit()
+        print("--- 🛠️ Exited UI Debugging Mode ---")
+
+
+# def debug_ui_elements():
+#     """
+#     Opens a browser, runs the analysis engine on all visible message elements,
+#     and writes a detailed diagnostic report to 'debug_analysis.txt'.
+#     """
+#     print("\n--- 🛠️ Starting UI Analysis Mode ---")
+#     driver = None
+#     try:
+#         driver = sh.open_whatsapp()
+#         if not driver:
+#             return
+
+#         input("\n✅ Browser is open. Manually open the target chat, then press Enter here to continue...")
+
+#         print("\nAnalyzing all visible message elements ('message-in' and 'message-out')...")
+#         elements = sh.get_element(driver, 'all_messages', timeout=10, find_all=True, suppress_error=True)
+
+#         if not elements:
+#             print("❌ No message elements were found on the screen.")
+#             return
+
+#         print(f"✅ Found {len(elements)} elements. Writing analysis to debug_analysis.txt...")
+        
+#         output_filename = "debug_analysis.txt"
+#         with open(output_filename, "w", encoding="utf-8") as f:
+#             f.write("WhatsApp Message Structure Analysis Report\n")
+#             f.write("="*50 + "\n\n")
+
+#             for i, element in enumerate(tqdm(elements, desc="🔍 Analyzing elements")):
+#                 report = sh.analyze_element_structure(element)
+#                 f.write(f"--- Element {i+1} ---\n")
+#                 f.write(f"Class: {report['class']}\n\n")
+                
+#                 # Print the result of every check
+#                 for check_name, result in report['checks'].items():
+#                     f.write(f"- Check for {check_name.replace('_', ' ')}: {result}\n")
+                
+#                 f.write("\n" + "="*50 + "\n\n")
+
+#         print(f"\n✅ Analysis complete! Please check the file: '{output_filename}'")
+#         print("    This file shows exactly what the script sees for each message type.")
+#         input("Press Enter to close the browser and exit debug mode.")
+
+#     except Exception as e:
+#         print(f"An error occurred during the debug session: {e}")
+#     finally:
+#         if driver:
+#             driver.quit()
+#         print("--- 🛠️ Exited Analysis Mode ---")
+
 if __name__ == "__main__":
     api_thread = threading.Thread(target=run_api_server, args=(config.YOUR_WHATSAPP_NAME, TASK_LOCK), daemon=True)
     api_thread.start()
     time.sleep(2)
-
     db.init_db()
     
     while True:
@@ -254,14 +360,14 @@ if __name__ == "__main__":
         print("1. Start Bot (Continuous Sync & AI Auto-Reply)")
         print("2. Update Database (One-Time Full Scan)")
         print("3. Database API Tools")
-        print("4. Exit")
-        choice = input("Enter your choice (0-4): ").strip()
+        print("4. Debug UI Elements")
+        print("5. Exit")
+        choice = input("Enter your choice (0-5): ").strip()
         
         if choice == '0':
             run_parallel_tasks(True)
         elif choice == '1':
             run_parallel_tasks(False)
-        
         elif choice == '2': 
             with TASK_LOCK:
                 driver = None
@@ -272,11 +378,11 @@ if __name__ == "__main__":
                 finally:
                     if driver:
                         driver.quit()
-        
         elif choice == '3':
             run_api_tools()
-
-        elif choice == '4': 
+        elif choice == '4':
+            debug_ui_elements()
+        elif choice == '5': 
             print("👋 Exiting program."); break
         else: 
             print("❌ Invalid choice.")

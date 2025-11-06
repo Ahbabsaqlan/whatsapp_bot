@@ -10,6 +10,7 @@ required_libs = {
     "requests": "requests",
     "pyperclip": "pyperclip",
     "python-dotenv": "dotenv",
+    "beautifulsoup4": "bs4"
 }
 
 def install_missing_libs():

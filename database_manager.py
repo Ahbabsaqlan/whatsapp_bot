@@ -40,9 +40,10 @@ def init_db():
         sender_name TEXT NOT NULL,
         content TEXT NOT NULL,
         message_index INTEGER NOT NULL,
-        sending_date TEXT NOT NULL, -- For sorting
+        sending_date TEXT NOT NULL,
         stored_date TEXT NOT NULL,
-        meta_text TEXT NOT NULL,       -- For preventing duplicates
+        meta_text TEXT UNIQUE,
+        attachment_filename TEXT, -- <-- NEW COLUMN
         FOREIGN KEY (conversation_id) REFERENCES Conversations (id)
     );
     """)
@@ -79,11 +80,18 @@ def save_messages_to_db(contact_name, phone_number, new_messages):
             msg_datetime = datetime.datetime.strptime(f"{msg['date']} {msg['time']}", "%d/%m/%Y %I:%M %p")
             sending_date_iso = msg_datetime.isoformat()
         except (ValueError, KeyError, TypeError):
-            sending_date_iso = now_iso
+            sending_date_iso = datetime.datetime.now().isoformat()
+        
+        # --- NEW: Get the attachment filename from the parsed data ---
+        attachment = msg.get('attachment_filename')
 
+        # --- MODIFIED INSERT STATEMENT ---
         cursor.execute(
-            "INSERT OR IGNORE INTO Messages (conversation_id, role, sender_name, content, message_index, sending_date, stored_date, meta_text) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-            (conversation_id, role, sender_name, msg['content'], current_size + messages_added + 1, sending_date_iso, now_iso, msg['meta_text'])
+            """INSERT OR IGNORE INTO Messages (conversation_id, role, sender_name, content, message_index, 
+               sending_date, stored_date, meta_text, attachment_filename) 
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (conversation_id, role, sender_name, msg['content'], current_size + messages_added + 1, 
+             sending_date_iso, datetime.datetime.now().isoformat(), msg['meta_text'], attachment)
         )
         if cursor.rowcount > 0:
             messages_added += 1
