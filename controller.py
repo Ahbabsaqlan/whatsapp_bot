@@ -86,6 +86,17 @@ def send_message_via_api(phone_number, text):
         print(f"   Please ensure the main script is running. Error: {e}")
         return False
 
+def get_prompt_history(phone_number, count=15):
+    """Calls the API to get the recent message history for a contact."""
+    try:
+        params = {"phone_number": phone_number, "count": count}
+        response = requests.get(f"{API_BASE_URL}/prompt_history", params=params)
+        response.raise_for_status()
+        return response.json()
+    except requests.exceptions.RequestException as e:
+        print(f"❌ API Error: Could not get prompt history for '{phone_number}'. Error: {e}")
+        return None
+    
 # --- API Tool Functions ---
 def get_summary_by_title(title):
     try:

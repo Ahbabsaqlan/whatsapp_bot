@@ -8,7 +8,8 @@ required_libs = {
     "tqdm": "tqdm",
     "Flask": "flask",
     "requests": "requests",
-    "pyperclip": "pyperclip"
+    "pyperclip": "pyperclip",
+    "python-dotenv": "dotenv",
 }
 
 def install_missing_libs():

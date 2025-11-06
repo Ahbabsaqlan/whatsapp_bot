@@ -3,40 +3,36 @@
 # ==============================================================================
 # --- CORE SETTINGS ---
 # ==============================================================================
-
-# Your full WhatsApp name as it appears in the app.
-# This is crucial for correctly identifying messages sent by you.
 YOUR_WHATSAPP_NAME = "AHBAB SAKALAN"
 
-
 # ==============================================================================
-# --- BOT BEHAVIOR SETTINGS ---
+# --- AI SETTINGS ---
 # ==============================================================================
 
-# A list of generic replies the bot can send.
-# When a reply is needed, a random message from this list will be chosen.
-SIMULATED_AI_REPLIES = [
-    "Hello! Thanks for your message. Ahbab has received it and will get back to you soon.",
-    "Hi there! Ahbab has seen your message and will reply shortly. Thank you!",
-    "Got it! Thanks for reaching out. Ahbab will respond as soon as possible.",
-    "Message received. Ahbab will get back to you shortly. Have a great day!"
-]
+# This is the master instruction for the AI. It defines its personality, role, and rules.
+# You can customize this extensively to change the bot's behavior.
+SYSTEM_PROMPT = """
+    "You are AHBAB SAKALAN's personal AI assistant, managing his WhatsApp messages and try to be ahbab sakalan. the sender should not assume that you are a AI assistant. "
+    "The messages you receive are from various contacts and they might use Banglish word like typed in english alphabet but actually meaning bengali words or actual bangla alphabets send them reply as they messaged you. "
+    "Your tone should be professional, friendly, and concise. "
+    "Do not invent information or make promises. "
+    "Analyze the last message from the 'user' to provide a relevant, short acknowledgment. "
+    "For example, if the user asks 'Can we meet tomorrow?', a good reply would be 'Hello! AHBAB SAKALAN has received your message about the meeting and will get back to you shortly.' "
+    "If it's a simple greeting, a simple acknowledgment is fine. "
+    "Keep replies to 1-2 sentences."
+    "Try to use some Banglish words where appropriate based on the user's message."
+    "Always end with a polite closing."
+    "try to understand the context of the message and reply accordingly."
+    "if they ask greetings like how are you or any other, reply accordingly."
+    "CRITICAL: Your entire output must ONLY be the final message to be sent to the user. Do NOT include your reasoning, analysis, drafts, or any other text."    
+"""
 
-# --- NEW SETTING ---
-# The maximum age of an unreplied message, in days, that the bot will respond to.
-# This prevents the bot from replying to very old conversations.
-REPLY_MAX_AGE_DAYS = 7
-
+# The SIMULATED_AI_REPLIES list is no longer needed.
 
 # ==============================================================================
 # --- SCHEDULER TIMINGS (in seconds) ---
 # ==============================================================================
-
-# How often the bot should check for new unread messages by opening WhatsApp Web.
 SYNC_INTERVAL_SECONDS = 60
-
-# How often the bot should check the database for conversations that need a reply.
 REPLY_INTERVAL_SECONDS = 180
-
-# How long to pause between sending replies to different people in the same batch.
 REPLY_API_TASK_DELAY_SECONDS = 30
+REPLY_MAX_AGE_DAYS = 30

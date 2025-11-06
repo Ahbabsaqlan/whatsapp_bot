@@ -4,13 +4,14 @@ utility.install_missing_libs()
 import time
 import threading
 import random
-import controller as db
+import controller as db  # Using your new name
 import selenium_handler as sh
 import config
 from datetime import datetime, timedelta
-
+import ai_manager as ai  # Import the new AI manager
 
 from tqdm import tqdm
+from selenium.webdriver.support import expected_conditions as EC
 from api_routes import app
 
 TASK_LOCK = threading.Lock()
@@ -19,16 +20,17 @@ def run_api_server(whatsapp_name, lock):
     """Function to run the Flask API server, now aware of the global lock."""
     print("🚀 Starting API server on http://127.0.0.1:5001...")
     app.config['YOUR_WHATSAPP_NAME'] = whatsapp_name
-    app.config['TASK_LOCK'] = lock  # Make the lock available to API routes
+    app.config['TASK_LOCK'] = lock
     import logging
     log = logging.getLogger('werkzeug')
     log.setLevel(logging.ERROR)
     app.run(port=5001)
 
+# --- THIS IS THE FINAL AI-POWERED VERSION ---
 def process_unreplied_queue():
     """
-    Checks DB for unreplied messages. It does NOT need a lock itself, as it only
-    triggers the API, and the API worker will handle acquiring the lock.
+    Checks DB for recent unreplied messages, generates a reply using Gemini,
+    and triggers the API to send it.
     """
     print("   Checking database for unreplied messages...")
     try:
@@ -58,16 +60,28 @@ def process_unreplied_queue():
                 print(f"   ⚠️ Skipping '{title}' due to invalid last message date: {last_message_date_str}")
                 continue
 
-            reply_text = random.choice(config.SIMULATED_AI_REPLIES)
-            print(f"   🤖 Triggering API reply for recent message from '{title}' ({number})...")
-            db.send_message_via_api(number, reply_text)
-            time.sleep(config.REPLY_API_TASK_DELAY_SECONDS) 
+            # --- GEMINI INTEGRATION LOGIC ---
+            print(f"\n   Processing AI reply for '{title}'...")
+            # 1. Fetch conversation history for context
+            history = db.get_prompt_history(number)
+            if not history:
+                print(f"   Could not fetch history for '{title}'. Skipping AI reply.")
+                continue
+
+            # 2. Generate a reply using the AI manager
+            reply_text = ai.generate_reply(history, config.YOUR_WHATSAPP_NAME)
+
+            # 3. Send the AI-generated reply if it's valid
+            if reply_text:
+                db.send_message_via_api(number, reply_text)
+                time.sleep(config.REPLY_API_TASK_DELAY_SECONDS)
+            else:
+                print(f"   AI did not generate a reply for '{title}'. Skipping.")
             
         print("   ✅ Finished processing unreplied queue.")
     except Exception as e:
         print(f"\n   ❌ An error occurred during queue processing: {e}")
 
-# --- MODIFIED FUNCTION ---
 def run_sync_task():
     """
     This scheduled task now also acquires the lock before running, ensuring it
@@ -79,7 +93,7 @@ def run_sync_task():
         driver = None
         try:
             driver = sh.open_whatsapp()
-            if not driver: # Handle startup failure (e.g., network error)
+            if not driver:
                 raise Exception("Failed to open WhatsApp for sync.")
 
             unread_button = sh.get_element(driver, "unread_filter_button", wait_condition=sh.EC.element_to_be_clickable, timeout=5, suppress_error=True)
@@ -115,19 +129,18 @@ def run_sync_task():
                 driver.quit()
             print("   Releasing lock.")
 
-# ==============================================================================
-# --- NEW PARALLEL TASK SCHEDULER ---
-# ==============================================================================
-
 def run_parallel_tasks(only_sync=False):
     """
-    The main scheduler loop. It runs sync and reply tasks on independent timers,
-    giving the appearance of parallel execution while safely managing the
-    single browser profile resource.
+    The main scheduler loop. It runs sync and reply tasks on independent timers.
     """
     print("\n--- 🤖 Starting Parallel Bot Operations (Press Ctrl+C to stop) ---")
+    if only_sync:
+        print("    - Mode: Sync Only")
+    else:
+        print("    - Mode: Sync & Auto-Reply")
     print(f"    - Syncing new messages every {config.SYNC_INTERVAL_SECONDS} seconds.")
-    print(f"    - Replying to messages every {config.REPLY_INTERVAL_SECONDS} seconds.")
+    if not only_sync:
+        print(f"    - Replying to messages every {config.REPLY_INTERVAL_SECONDS} seconds.")
     
     last_sync_time = 0
     last_reply_time = 0
@@ -135,29 +148,23 @@ def run_parallel_tasks(only_sync=False):
     try:
         while True:
             now = time.time()
-
-            # --- Check if it's time to run the SYNC task ---
             if (now - last_sync_time) > config.SYNC_INTERVAL_SECONDS:
                 print("\n" + "─"*15 + " [SYNC TASK TRIGGERED] " + "─"*16)
                 run_sync_task()
-                last_sync_time = now # Reset timer after task runs
+                last_sync_time = now
                 print("─"*15 + " [SYNC TASK COMPLETE] " + "─"*17)
+
             if not only_sync:
-                # --- Check if it's time to run the REPLY task ---
                 if (now - last_reply_time) > config.REPLY_INTERVAL_SECONDS:
                     print("\n" + "─"*15 + " [REPLY TASK TRIGGERED] " + "─"*15)
                     process_unreplied_queue()
-                    last_reply_time = now # Reset timer after task runs
+                    last_reply_time = now
                     print("─"*15 + " [REPLY TASK COMPLETE] " + "─"*16)
-            # A short sleep to prevent the loop from consuming 100% CPU
+            
             time.sleep(5)
             
     except KeyboardInterrupt:
         print("\n🛑 Bot operations stopped by user.")
-
-# ==============================================================================
-# --- UTILITY AND MENU FUNCTIONS ---
-# ==============================================================================
 
 def run_full_update(driver):
     """Performs a one-time, full scan of all contacts to build the database."""
@@ -199,7 +206,7 @@ def run_api_tools():
         elif choice == '3':
             conversations = db.get_all_unreplied_conversations()
             print("\n--- Unreplied Conversations ---")
-            for conv in conversations: print(f"  - {conv['title']} ({conv.get('phone_number', 'N/A')}) | Last updated: {conv['updated'][:16]}")
+            for conv in conversations: print(f"  - {conv['title']} ({conv.get('phone_number', 'N/A')}) | Last message: {conv.get('last_message_date', 'N/A')[:16]}")
         elif choice == '4':
             print("\nThis tool will send a request to the API server to perform a full")
             print("'Sync & Send' operation in a new, dedicated browser session.")
@@ -218,9 +225,6 @@ def run_api_tools():
         else:
             print("❌ Invalid choice.")
 
-# ==============================================================================
-# --- MAIN EXECUTION BLOCK ---
-# ==============================================================================
 if __name__ == "__main__":
     api_thread = threading.Thread(target=run_api_server, args=(config.YOUR_WHATSAPP_NAME, TASK_LOCK), daemon=True)
     api_thread.start()
@@ -230,8 +234,8 @@ if __name__ == "__main__":
     
     while True:
         print("\n" + "="*40 + "\n       WhatsApp Automation Menu\n" + "="*40)
-        print("0. Start Bot (Continuous Sync)")
-        print("1. Start Bot (Continuous Sync & Auto-Reply)")
+        print("0. Start Bot (Continuous Sync Only)")
+        print("1. Start Bot (Continuous Sync & AI Auto-Reply)")
         print("2. Update Database (One-Time Full Scan)")
         print("3. Database API Tools")
         print("4. Exit")
@@ -243,13 +247,15 @@ if __name__ == "__main__":
             run_parallel_tasks(False)
         
         elif choice == '2': 
-            driver = None
-            try:
-                driver = sh.open_whatsapp()
-                run_full_update(driver)
-            finally:
-                if driver:
-                    driver.quit()
+            with TASK_LOCK:
+                driver = None
+                try:
+                    driver = sh.open_whatsapp()
+                    if driver:
+                        run_full_update(driver)
+                finally:
+                    if driver:
+                        driver.quit()
         
         elif choice == '3':
             run_api_tools()
