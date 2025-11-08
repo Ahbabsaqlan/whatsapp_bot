@@ -53,6 +53,8 @@
 
   "message_image_or_video_container": ".//div[div[@role='button'] and .//img[@alt]]",
   
-  "document_filename_in_chat": ".//span[@dir='auto' and @aria-label]"
+  "document_filename_in_chat": ".//span[@dir='auto' and @aria-label]",
+
+  "media_links_docs_button" :  "//div[text()='Media, links and docs']/ancestor::div[@role='button'][1]"
   
 }

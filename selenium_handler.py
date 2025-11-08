@@ -8,10 +8,9 @@ import platform
 import random
 import pyperclip
 import config
-
+from uuid import uuid4
 from bs4 import BeautifulSoup
 from datetime import datetime
-from tqdm import tqdm
 from selenium.webdriver.common.keys import Keys
 from selenium import webdriver
 from selenium.webdriver.common.by import By
@@ -64,50 +63,6 @@ def get_element(driver, key, timeout=10, find_all=False, wait_condition=EC.prese
     except StaleElementReferenceException:
         if not suppress_error: print(f"⚠️ Warning: Element for selector key '{key}' became stale.")
         return [] if find_all else None
-
-
-# def open_whatsapp():
-#     """
-#     Opens WhatsApp Web with a robust, cache-first ChromeDriver setup.
-#     Now includes error handling for network issues.
-#     """
-#     session_dir = ensure_session_dir()
-#     options = Options()
-#     options.add_argument(f"--user-data-dir={os.path.abspath(session_dir)}")
-#     options.add_argument("--profile-directory=Default")
-#     options.add_argument("--start-maximized")
-
-#     driver_path = None
-#     try:
-#         print("🌐 Checking for latest ChromeDriver...")
-#         driver_path = ChromeDriverManager().install()
-#         service = Service(driver_path)
-#     except Exception as e:
-#         print(f"⚠️ Could not connect to download ChromeDriver: {e}")
-#         # ... (offline driver finding logic is unchanged) ...
-        
-#     try:
-#         driver = webdriver.Chrome(service=service, options=options)
-        
-#         print("📱 Navigating to WhatsApp Web...")
-#         driver.get("https://web.whatsapp.com")
-        
-#         print("... Please scan the QR code if not already logged in...")
-#         if not get_element(driver, "login_check", timeout=60, context_message="Wait for main chat page to load."):
-#             print("❌ Login timed out. Exiting task."); driver.quit(); return None
-        
-#         print("✅ Login successful."); return driver
-
-#     # --- NEW: Catch network and other web driver errors ---
-#     except WebDriverException as e:
-#         if "net::ERR_NAME_NOT_RESOLVED" in e.msg or "net::ERR_INTERNET_DISCONNECTED" in e.msg:
-#             print("\n❌ Network Error: Could not connect to WhatsApp. Please check your internet connection.")
-#         else:
-#             print(f"\n❌ A WebDriver error occurred during startup: {e}")
-#         return None # Return None to signal failure
-#     except Exception as e:
-#         print(f"\n❌ An unexpected error occurred while opening WhatsApp: {e}")
-#         return None
 
 
 def open_whatsapp():
@@ -198,26 +153,6 @@ def ensure_session_dir():
     session_dir = "whatsapp_automation_profile"
     if not os.path.exists(session_dir): os.makedirs(session_dir)
     return session_dir
-
-# def get_all_contacts(driver):
-#     try: chat_list = driver.find_element(By.ID, SELECTORS["chat_list_pane_id"])
-#     except NoSuchElementException: return []
-#     contacts_set, last_height, consecutive_no_change = set(), -1, 0
-#     while consecutive_no_change < 3:
-#         for el in get_element(driver, "chat_list_titles", timeout=2, find_all=True):
-#             try:
-#                 name = el.get_attribute("title")
-#                 if name: contacts_set.add(name.strip())
-#                 print(f"   ...found contact: '{name.strip()}'")
-#             except StaleElementReferenceException: continue
-#         print(f"   ...collected {len(contacts_set)} unique contacts so far...")
-#         driver.execute_script("arguments[0].scrollTop += 1200;", chat_list)
-#         time.sleep(1)
-#         new_height = driver.execute_script("return arguments[0].scrollTop", chat_list)
-#         if new_height == last_height: consecutive_no_change += 1
-#         else: consecutive_no_change, last_height = 0, new_height
-#         if new_height >= driver.execute_script("return arguments[0].scrollHeight", chat_list): break
-#     return list(contacts_set)
 
 
 def get_all_contacts(driver):
@@ -414,7 +349,7 @@ def smart_scroll_and_collect(driver, stop_at_last=None):
 
     # --- PASS 1: GATHER RAW HTML ---
     print("   --- Pass 1: Scrolling and collecting raw HTML for all messages ---")
-    raw_html_snippets = []
+    final_data = []
     seen_html = set()
     found_stop_point = False
     consecutive_no_new = 0
@@ -429,12 +364,14 @@ def smart_scroll_and_collect(driver, stop_at_last=None):
                 
                 new_found_this_scroll = True
                 seen_html.add(html)
-                raw_html_snippets.append(html)
+                parsed = parse_message_from_html(driver, html)
+                if parsed:
+                    final_data.append(parsed)
                 
                 if stop_at_last and stop_at_last in html:
                     print("⏹️ Reached previously stored last message during scroll.")
                     found_stop_point = True
-                    raw_html_snippets.pop()
+                    final_data.pop()
                     break
             except StaleElementReferenceException:
                 continue
@@ -448,101 +385,47 @@ def smart_scroll_and_collect(driver, stop_at_last=None):
         driver.execute_script("arguments[0].scrollTop = 0;", chat_container)
         time.sleep(2) # Give more time for lazy loading
 
-    # --- PASS 2: PROCESS RAW HTML ---
-    print(f"   --- Pass 2: Parsing {len(raw_html_snippets)} collected messages ---")
-    final_data = []
-    for html_snippet in tqdm(raw_html_snippets[::-1], desc="   Parsing messages"):
-        parsed = parse_message_from_html(driver, html_snippet)
-        if parsed:
-            final_data.append(parsed)
-            
+    final_data.reverse() # Oldest messages first  
     return final_data
 
 
-# def parse_message(msg):
-#     """
-#     Parses a message element, fixes the date format, and creates a more
-#     reliable unique ID to prevent skipping messages sent in the same minute.
-#     """
-#     try:
-#         msg_class = msg.get_attribute('class')
-#         role = 'me' if 'message-out' in msg_class else 'user'
-        
-#         meta_div = msg.find_element(By.CSS_SELECTOR, SELECTORS["message_meta_data"])
-#         meta_text = meta_div.get_attribute("data-pre-plain-text")
-        
-#         match = re.match(r"\[(.*?), (.*?)\] (.*?):", meta_text)
-#         if not match: return None
-        
-#         time_str, date_str, sender = match.groups()
-        
-#         content = None
-#         try:
-#             text_element = msg.find_element(By.CSS_SELECTOR, SELECTORS["message_text_content"])
-#             text = text_element.text.strip()
-#             if text:
-#                 content = text
-#         except NoSuchElementException:
-#             pass
-#         if content is None:
-#             try:
-#                 body_element = msg.find_element(By.CSS_SELECTOR, "div.copyable-text")
-#                 body_text = body_element.text.strip()
-#                 if body_text:
-#                     if re.search(r'\d{1,2}:\d{2}\s*(?:AM|PM)$', body_text):
-#                         body_text = re.sub(r'\s*\d{1,2}:\d{2}\s*(?:AM|PM)$', '', body_text).strip()
-#                     content = body_text
-#             except NoSuchElementException:
-#                 pass
-#         if content is None:
-#             content = "📎 Media (Image/Video/Doc/Sticker)"
-
-#         unique_meta_text = f"{meta_text}{content[:50]}"
-
-#         return {
-#             "date": date_str.strip(), # This is 'DD/MM/YYYY'
-#             "time": time_str.strip(),
-#             "sender": sender.strip(),
-#             "content": content.strip(),
-#             "meta_text": unique_meta_text, 
-#             "role": role
-#         }
-#     except (NoSuchElementException, StaleElementReferenceException): 
-#         return None
-
-
-# In selenium_handler.py
-
-# ... (All other functions are correct and unchanged) ...
-
-# --- THIS IS THE FINAL, RE-ENGINEERED PARSER WITH HYPER-SPECIFIC XPATHS ---
 def parse_message_from_html(driver, html_snippet):
     """
-    Parses a static HTML snippet using BeautifulSoup and triggers targeted,
-    robust Selenium actions only for downloads. This version uses hyper-specific
-    XPaths anchored by meta-text to guarantee the correct element is clicked.
+    Parses a static HTML snippet using a hybrid re-find strategy and now
+    gracefully handles special message types like "deleted message".
     """
     soup = BeautifulSoup(html_snippet, 'html.parser')
     message_container = soup.find('div', class_=lambda c: c and 'message-' in c)
     if not message_container: return None
 
+    # --- NEW: Check for special message types FIRST ---
+    # Check for "You deleted this message" bubble, which has a unique icon.
+    deleted_icon = soup.find('span', {'data-icon': 'recalled'})
+    if deleted_icon:
+        # We can identify it, but we don't need to save it. Silently skip.
+        print("   - Info: Skipping a 'deleted message' bubble.")
+        return None
+
     # --- Stage 1: Basic Metadata ---
     sender, time_str, date_str, role, meta_text_raw = "Unknown", "", "", "user", ""
     
     meta_div = soup.find('div', {'data-pre-plain-text': True})
-    if meta_div and meta_div.get('data-pre-plain-text'):
+    has_meta_text = meta_div and meta_div.get('data-pre-plain-text')
+    
+    if has_meta_text:
         meta_text_raw = meta_div['data-pre-plain-text']
         match = re.match(r"\[(.*?), (.*?)\] (.*?):", meta_text_raw)
         if match:
             time_str, date_str, sender = [s.strip() for s in match.groups()]
-    else: # Fallback for elements without meta_text but with sender info
+    else:
         sender_span = soup.find('span', {'aria-label': True})
         if sender_span: sender = sender_span['aria-label'].replace(":", "").strip()
         time_span = soup.find('span', {'dir': 'auto', 'class': 'x16dsc37'})
         if time_span: time_str = time_span.text.strip()
         date_str = datetime.now().strftime("%d/%m/%Y")
         
-    role = 'me' if sender == "You" or config.YOUR_WHATSAPP_NAME in sender else 'user'
+    role = 'me' if sender == "You" or (sender and config.YOUR_WHATSAPP_NAME in sender) else 'user'
+    if sender == "You": sender = config.YOUR_WHATSAPP_NAME
     
     content = None
     attachment_filename = None
@@ -550,17 +433,22 @@ def parse_message_from_html(driver, html_snippet):
     # --- Stage 2: Identify and Process by Message Type ---
     
     doc_container = soup.find('div', {'role': 'button', 'title': lambda t: t and t.startswith('Download')})
+    image_container = soup.find('div', {'role': 'button', 'aria-label': 'Open picture'})
+    video_container = soup.find('span', {'data-icon': 'media-play'})
+
     if doc_container:
         filename_span = doc_container.find('span', {'dir': 'auto', 'class': 'x13faqbe'})
         if filename_span:
             expected_filename = filename_span.text
             content = f"📎 Document: {expected_filename}"
             try:
-                # --- FIX: HYPER-SPECIFIC XPATH FOR DOCUMENTS ---
-                # Find the element based on the unique meta_text of its parent bubble.
-                element_to_click_xpath = f"//div[@data-pre-plain-text=\"{meta_text_raw}\"]//div[@role='button' and starts-with(@title, 'Download')]"
-                element_to_click = driver.find_element(By.XPATH, element_to_click_xpath)
+                # Use a precise XPath to re-find the element to click
+                if has_meta_text:
+                    element_to_click_xpath = f"//div[@data-pre-plain-text=\"{meta_text_raw}\"]//span[text()=\"{expected_filename}\"]/ancestor::div[@role='button'][1]"
+                else: # Fallback for attachments without meta-text
+                    element_to_click_xpath = f"//span[text()='{time_str}']/ancestor::div[contains(@class, 'message-')][1]//div[@role='button' and contains(@title, 'Download')]"
                 
+                element_to_click = driver.find_element(By.XPATH, element_to_click_xpath)
                 driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", element_to_click)
                 time.sleep(0.5)
                 driver.execute_script("arguments[0].click();", element_to_click)
@@ -575,13 +463,15 @@ def parse_message_from_html(driver, html_snippet):
     elif soup.find('a', href=lambda h: h and 'maps.google.com' in h):
         content = f"📍 Location: {soup.find('a')['href']}"
 
-    elif soup.find('div', {'role': 'button', 'aria-label': 'Open picture'}) or soup.find('span', {'data-icon': 'media-play'}):
-        media_type = "🎥 Video" if soup.find('span', {'data-icon': 'media-play'}) else "📷 Image"
+    elif image_container or video_container:
+        media_type = "🎥 Video" if video_container else "📷 Image"
         try:
-            # --- FIX: HYPER-SPECIFIC XPATH FOR MEDIA ---
-            element_to_click_xpath = f"//div[@data-pre-plain-text=\"{meta_text_raw}\"]/ancestor::div[contains(@class, 'message-')][1]//div[@role='button']"
+            if has_meta_text:
+                element_to_click_xpath = f"//div[@data-pre-plain-text=\"{meta_text_raw}\"]/ancestor::div[contains(@class, 'message-')][1]//div[@role='button']"
+            else:
+                element_to_click_xpath = f"//span[text()='{time_str}']/ancestor::div[contains(@class, 'message-')][1]//div[@role='button']"
+
             element_to_click = driver.find_element(By.XPATH, element_to_click_xpath)
-            
             driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", element_to_click)
             time.sleep(0.5)
             
@@ -609,14 +499,17 @@ def parse_message_from_html(driver, html_snippet):
 
     else:
         text_span = soup.find('span', class_='selectable-text')
-        if text_span: content = text_span.text.strip()
-        else: content = "Unsupported or Empty Message"
+        if text_span:
+            content = text_span.text.strip()
+        else:
+            content = "Unsupported or Empty Message"
 
     # --- Stage 3: Finalize ---
     meta_text_reconstructed = f"[{time_str}, {date_str}] {sender}: "
     unique_meta_text = f"{meta_text_reconstructed}{content[:50]}"
 
     return {"date": date_str, "time": time_str, "sender": sender, "content": content, "meta_text": unique_meta_text, "role": role, "attachment_filename": attachment_filename}
+
 
 # Helper for deterministic download waiting
 def _wait_for_download_and_get_filename(expected_filename_part, timeout=45):
@@ -734,7 +627,6 @@ def send_file_with_caption(driver, file_path, caption=None):
         return False
     
 
-
 def close_current_chat(driver):
     """
     Closes the current chat using the explicit Menu -> Close chat action.
@@ -760,7 +652,6 @@ def close_current_chat(driver):
 
     except Exception as e:
         print(f"❌ An error occurred while trying to close the chat: {e}")
-
 
 
 def inspect_element_html(driver, selector_key, find_all=False):
@@ -797,6 +688,7 @@ def inspect_element_html(driver, selector_key, find_all=False):
 
     except Exception as e:
         print(f"An unexpected error occurred during inspection: {e}")
+
 
 def debug_parse_message_structure(msg_element):
     """
