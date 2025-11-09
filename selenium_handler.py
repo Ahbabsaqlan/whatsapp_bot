@@ -476,7 +476,7 @@ def remove_duplicates_by_filename(final_data):
 def dismiss_photo_unavailable(driver):
     try:
         # The popup container
-        popup = driver.find_element('xpath', '//div[@aria-label="Photo unavailable"]')
+        popup = driver.find_element('xpath', '//div[@aria-label="Photo unavailable Can\'t view this photo because it\'s no longer on your phone."]')
         if popup:
             # Find the OK button inside the popup
             ok_button = popup.find_element('xpath', './/span[text()="OK"]')
