@@ -18,7 +18,7 @@ from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.chrome.options import Options
-from selenium.common.exceptions import NoSuchElementException, TimeoutException, StaleElementReferenceException,NoSuchWindowException, WebDriverException
+from selenium.common.exceptions import NoSuchElementException, TimeoutException, StaleElementReferenceException,NoSuchWindowException, WebDriverException,ElementClickInterceptedException
 from webdriver_manager.chrome import ChromeDriverManager
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
@@ -358,41 +358,49 @@ def smart_scroll_and_collect(driver, stop_at_last=None):
     index = 0
 
     while not found_stop_point and consecutive_no_new < 3:
+        dismiss_photo_unavailable(driver)  # auto-dismiss popup
         elements = get_element(driver, "all_messages", find_all=True, suppress_error=True)
         new_found_this_scroll = False
 
         for element in reversed(elements):
             try:
                 html = element.get_attribute('outerHTML')
-                if html in seen_html:
+                if not html or html in seen_html:
                     continue
 
-                # --- STOP CONDITION (text or attachment match) ---
-                
-
-                new_found_this_scroll = True
-                seen_html.add(html)
-
                 soup = BeautifulSoup(html, 'html.parser')
-                doc_container = soup.find('div', {'role': 'button', 'title': lambda t: t and t.startswith('Download')})
+                doc_container = soup.find(
+                    'div', {'role': 'button', 'title': lambda t: t and t.startswith('Download')}
+                )
+
+                # Check for duplicate files before parsing
                 if doc_container:
                     full_title = doc_container.get('title')
                     filename = full_title.removeprefix("Download").strip().strip('"').strip("'")
                     existing_files = [f.lower().strip() for f in os.listdir(config.ATTACHMENTS_DIR)]
                     if filename.lower() in existing_files:
                         print(f"⚠️ Skipping duplicate file: {filename}")
+                        seen_html.add(html)
                         continue
 
-                index += 1
-                print(f"   ...processing message element {index}")
                 parsed = parse_message_from_html(driver, html)
-                if parsed:
-                    final_data.append(parsed)
+                if not parsed:
+                    seen_html.add(html)
+                    continue
+
+                # --- STOP CONDITION ---
                 meta_text = parsed.get('meta_text')
                 if stop_at_last and meta_text and stop_at_last in meta_text:
                     print("⏹️ Reached previously stored last message during scroll.")
                     found_stop_point = True
                     break
+
+                final_data.append(parsed)
+                seen_html.add(html)
+                index += 1
+                print(f"   ...processing message element {index}")
+
+                new_found_this_scroll = True
 
             except StaleElementReferenceException:
                 continue
@@ -404,9 +412,7 @@ def smart_scroll_and_collect(driver, stop_at_last=None):
         if not new_found_this_scroll:
             consecutive_no_new += 1
             print(f"   ⚠️ No new messages found ({consecutive_no_new}/3). Trying to load older messages...")
-
             try:
-                # Attempt to find and click the "Load older messages" button
                 load_btn = get_element(driver, "load_older_messages_button", timeout=3, suppress_error=True)
                 if load_btn:
                     print("   🔄 Clicking 'Load older messages' button...")
@@ -414,32 +420,26 @@ def smart_scroll_and_collect(driver, stop_at_last=None):
                     time.sleep(0.5)
                     driver.execute_script("arguments[0].click();", load_btn)
                     time.sleep(2)
-                    consecutive_no_new = 0  # reset after successful click
+                    consecutive_no_new = 0
                     continue
             except Exception as e:
                 print(f"   ⚠️ Couldn't click 'Load older messages' button: {e}")
         else:
             consecutive_no_new = 0
 
-        # Scroll to top to trigger lazy loading if still possible
         driver.execute_script("arguments[0].scrollTop = 0;", chat_container)
         time.sleep(2)
-    
-    # --- Reverse to get oldest-to-newest order ---
-    
 
     # --- Clean up duplicate files in attachments folder ---
     duplicate_pattern = re.compile(r"^(.*)\s\((\d+)\)(\.[^.]+)$")
     files = os.listdir(config.ATTACHMENTS_DIR)
     files.sort()
-
     for filename in files:
         match = duplicate_pattern.match(filename)
         if match:
             base_name = match.group(1) + match.group(3)
             full_path = os.path.join(config.ATTACHMENTS_DIR, filename)
             original_path = os.path.join(config.ATTACHMENTS_DIR, base_name)
-
             if os.path.exists(original_path):
                 print(f"🗑️ Removing duplicate: {filename}")
                 os.remove(full_path)
@@ -449,13 +449,13 @@ def smart_scroll_and_collect(driver, stop_at_last=None):
 
     print("✅ Duplicate cleanup complete.")
 
-
+    # --- Remove duplicates from final_data by attachment filename ---
     final_data = remove_duplicates_by_filename(final_data)
 
-
-
+    # --- Reverse to get oldest-to-newest order ---
     final_data.reverse()
     return final_data
+
 
 def remove_duplicates_by_filename(final_data):
     seen_files = set()
@@ -472,6 +472,21 @@ def remove_duplicates_by_filename(final_data):
         cleaned_data.append(entry)
 
     return cleaned_data
+
+def dismiss_photo_unavailable(driver):
+    try:
+        # The popup container
+        popup = driver.find_element('xpath', '//div[@aria-label="Photo unavailable"]')
+        if popup:
+            # Find the OK button inside the popup
+            ok_button = popup.find_element('xpath', './/span[text()="OK"]')
+            ok_button.click()
+            print("🗑️ Dismissed 'Photo unavailable' popup.")
+            time.sleep(1)  # small delay for UI update
+            return True
+    except (NoSuchElementException, ElementClickInterceptedException):
+        return False
+    return False
 
 def parse_message_from_html(driver, html_snippet):
     """
