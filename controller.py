@@ -122,6 +122,7 @@ def get_last_messages(title, count=5):
         return []
 
 def get_all_unreplied_conversations():
+
     try:
         response = requests.get(f"{API_BASE_URL}/unreplied")
         response.raise_for_status()
@@ -129,3 +130,15 @@ def get_all_unreplied_conversations():
     except requests.exceptions.RequestException as e:
         print(f"API Error: {e}")
         return []
+    
+
+def get_existing_attachments_from_db():
+    """Calls the API to get a set of all known attachment filenames."""
+    try:
+        response = requests.get(f"{API_BASE_URL}/attachments")
+        response.raise_for_status()
+        # The API returns a list, so we convert it back to a set for fast lookups.
+        return set(response.json())
+    except requests.exceptions.RequestException as e:
+        print(f"❌ API Error: Could not get existing attachments list. Error: {e}")
+        return set() # Return an empty set to prevent crashes

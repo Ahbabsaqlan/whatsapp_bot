@@ -37,8 +37,8 @@
   "message_location_link": ".//a[contains(@href, 'maps.google.com')]",
 
   "media_viewer_panel": "//div[@data-testid='media-viewer-content']",
-  "media_viewer_download_button": "//div[@aria-label='Media viewer']//span[@data-icon='download']",
-  "media_viewer_close_button": "//div[@aria-label='Media viewer']//span[@data-icon='x']",
+  "media_viewer_download_button": "//button[@aria-label='Download']//span[@data-icon='ic-download']",
+  "media_viewer_close_button": "//button[@aria-label='Close']//span[@data-icon='ic-close']",
   "media_viewer_filename": "//div[@aria-label='Media viewer']//span[@aria-live='polite']",
 
   "reply_message_box": "//div[@contenteditable='true'][@data-tab='10']",
@@ -58,3 +58,4 @@
   "media_links_docs_button" :  "//div[text()='Media, links and docs']/ancestor::div[@role='button'][1]"
   
 }
+

@@ -220,3 +220,29 @@ def get_contact_details_by_phone(phone_number):
         return {"title": contact_data["title"], "last_meta_text": contact_data["last_meta_text"]}
     else:
         return None
+    
+
+# In database_manager.py
+
+def get_existing_attachments_from_db():
+    """
+    Queries the database to get a set of all unique, non-empty attachment filenames.
+    This is designed to be called once for performance.
+    """
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        query = "SELECT DISTINCT attachment_filename FROM Messages WHERE attachment_filename IS NOT NULL AND attachment_filename != ''"
+        cursor.execute(query)
+        
+        # Use a set comprehension for efficiency
+        downloaded_files_set = {row['attachment_filename'] for row in cursor.fetchall()}
+        
+        print(f"🗄️ Found {len(downloaded_files_set)} existing attachment records in the database.")
+        return downloaded_files_set
+        
+    except sqlite3.Error as e:
+        print(f"   -> ⚠️ Database error while fetching attachments: {e}")
+        return set() # Return an empty set on error
+    finally:
+        conn.close()

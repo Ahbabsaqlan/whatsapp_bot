@@ -8,10 +8,12 @@ import platform
 import random
 import pyperclip
 import config
+from tqdm import tqdm
 from uuid import uuid4
 from bs4 import BeautifulSoup
 from datetime import datetime
 from selenium.webdriver.common.keys import Keys
+from selenium.webdriver.remote.webelement import WebElement
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.chrome.service import Service
@@ -341,53 +343,135 @@ def get_details_from_header(driver):
 
 def smart_scroll_and_collect(driver, stop_at_last=None):
     """
-    Pass 1: Scrolls up and collects the raw HTML of every message bubble.
-    Pass 2: Processes the raw HTML to extract data and trigger downloads.
+    Scrolls upward, loads all messages, and stops once the last stored message is found.
+    Handles duplicate attachment cleanup after collection.
     """
     chat_container = get_element(driver, "chat_container", timeout=10)
-    if not chat_container: return []
+    if not chat_container:
+        return []
 
-    # --- PASS 1: GATHER RAW HTML ---
     print("   --- Pass 1: Scrolling and collecting raw HTML for all messages ---")
     final_data = []
     seen_html = set()
     found_stop_point = False
     consecutive_no_new = 0
+    index = 0
 
     while not found_stop_point and consecutive_no_new < 3:
         elements = get_element(driver, "all_messages", find_all=True, suppress_error=True)
         new_found_this_scroll = False
+
         for element in reversed(elements):
             try:
                 html = element.get_attribute('outerHTML')
-                if html in seen_html: continue
+                if html in seen_html:
+                    continue
+
+                # --- STOP CONDITION (text or attachment match) ---
                 
+
                 new_found_this_scroll = True
                 seen_html.add(html)
+
+                soup = BeautifulSoup(html, 'html.parser')
+                doc_container = soup.find('div', {'role': 'button', 'title': lambda t: t and t.startswith('Download')})
+                if doc_container:
+                    full_title = doc_container.get('title')
+                    filename = full_title.removeprefix("Download").strip().strip('"').strip("'")
+                    existing_files = [f.lower().strip() for f in os.listdir(config.ATTACHMENTS_DIR)]
+                    if filename.lower() in existing_files:
+                        print(f"⚠️ Skipping duplicate file: {filename}")
+                        continue
+
+                index += 1
+                print(f"   ...processing message element {index}")
                 parsed = parse_message_from_html(driver, html)
                 if parsed:
                     final_data.append(parsed)
-                
-                if stop_at_last and stop_at_last in html:
+                meta_text = parsed.get('meta_text')
+                if stop_at_last and meta_text and stop_at_last in meta_text:
                     print("⏹️ Reached previously stored last message during scroll.")
                     found_stop_point = True
-                    final_data.pop()
                     break
+
             except StaleElementReferenceException:
                 continue
-        
-        if found_stop_point: break
+
+        # --- Handle "no new messages" condition ---
+        if found_stop_point:
+            break
+
         if not new_found_this_scroll:
             consecutive_no_new += 1
+            print(f"   ⚠️ No new messages found ({consecutive_no_new}/3). Trying to load older messages...")
+
+            try:
+                # Attempt to find and click the "Load older messages" button
+                load_btn = get_element(driver, "load_older_messages_button", timeout=3, suppress_error=True)
+                if load_btn:
+                    print("   🔄 Clicking 'Load older messages' button...")
+                    driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", load_btn)
+                    time.sleep(0.5)
+                    driver.execute_script("arguments[0].click();", load_btn)
+                    time.sleep(2)
+                    consecutive_no_new = 0  # reset after successful click
+                    continue
+            except Exception as e:
+                print(f"   ⚠️ Couldn't click 'Load older messages' button: {e}")
         else:
             consecutive_no_new = 0
-            
-        driver.execute_script("arguments[0].scrollTop = 0;", chat_container)
-        time.sleep(2) # Give more time for lazy loading
 
-    final_data.reverse() # Oldest messages first  
+        # Scroll to top to trigger lazy loading if still possible
+        driver.execute_script("arguments[0].scrollTop = 0;", chat_container)
+        time.sleep(2)
+    
+    # --- Reverse to get oldest-to-newest order ---
+    
+
+    # --- Clean up duplicate files in attachments folder ---
+    duplicate_pattern = re.compile(r"^(.*)\s\((\d+)\)(\.[^.]+)$")
+    files = os.listdir(config.ATTACHMENTS_DIR)
+    files.sort()
+
+    for filename in files:
+        match = duplicate_pattern.match(filename)
+        if match:
+            base_name = match.group(1) + match.group(3)
+            full_path = os.path.join(config.ATTACHMENTS_DIR, filename)
+            original_path = os.path.join(config.ATTACHMENTS_DIR, base_name)
+
+            if os.path.exists(original_path):
+                print(f"🗑️ Removing duplicate: {filename}")
+                os.remove(full_path)
+            else:
+                print(f"↪️ Renaming {filename} → {base_name}")
+                os.rename(full_path, original_path)
+
+    print("✅ Duplicate cleanup complete.")
+
+
+    final_data = remove_duplicates_by_filename(final_data)
+
+
+
+    final_data.reverse()
     return final_data
 
+def remove_duplicates_by_filename(final_data):
+    seen_files = set()
+    cleaned_data = []
+
+    for entry in final_data:
+        fname = entry.get("attachment_filename")
+        if fname:
+            # Normalize filename by removing copy suffixes like (1), (2)
+            normalized_fname = re.sub(r'\s*\(\d+\)(?=\.\w+$)', '', fname).lower().strip()
+            if normalized_fname in seen_files:
+                continue
+            seen_files.add(normalized_fname)
+        cleaned_data.append(entry)
+
+    return cleaned_data
 
 def parse_message_from_html(driver, html_snippet):
     """
@@ -434,28 +518,49 @@ def parse_message_from_html(driver, html_snippet):
     
     doc_container = soup.find('div', {'role': 'button', 'title': lambda t: t and t.startswith('Download')})
     image_container = soup.find('div', {'role': 'button', 'aria-label': 'Open picture'})
-    video_container = soup.find('span', {'data-icon': 'media-play'})
+    video_container = soup.select_one("div:has(div span[data-icon='media-play'])")
+
 
     if doc_container:
-        filename_span = doc_container.find('span', {'dir': 'auto', 'class': 'x13faqbe'})
-        if filename_span:
-            expected_filename = filename_span.text
-            content = f"📎 Document: {expected_filename}"
-            try:
-                # Use a precise XPath to re-find the element to click
-                if has_meta_text:
-                    element_to_click_xpath = f"//div[@data-pre-plain-text=\"{meta_text_raw}\"]//span[text()=\"{expected_filename}\"]/ancestor::div[@role='button'][1]"
-                else: # Fallback for attachments without meta-text
-                    element_to_click_xpath = f"//span[text()='{time_str}']/ancestor::div[contains(@class, 'message-')][1]//div[@role='button' and contains(@title, 'Download')]"
+        full_title = doc_container.get('title')
+        filename = full_title.removeprefix("Download").strip()
+        print(f"   - Found document attachment: {filename}")
+        
+        
+        
+        try:    
+            element_to_click_xpaths = f"//div[@role='button' and contains(@title, 'Download {filename}')]"
+            element_to_click_xpath = driver.find_element(By.XPATH, element_to_click_xpaths)
+            driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", element_to_click_xpath)
+            time.sleep(0.5)
+            download_start_time = time.time()
+            driver.execute_script("arguments[0].click();", element_to_click_xpath)
+            attachment_filename = _wait_for_newest_file(config.ATTACHMENTS_DIR, download_start_time)
+            if attachment_filename: 
+                content = f"📎 Document: {attachment_filename}"
+            else:
+                content = f"📎 Document: download failed"
+        except Exception as e:
+            print(f"  - Warning (Doc Download): Could not click element for {attachment_filename}. Reason: {e}")
+
+        # if attachment_filename:
+        #     expected_filename = attachment_filename
+        #     content = f"📎 Document: {expected_filename}"
+        #     try:
+        #         # Use a precise XPath to re-find the element to click
+        #         if has_meta_text:
+        #             element_to_click_xpath = f"//div[@data-pre-plain-text=\"{meta_text_raw}\"]//span[text()=\"{expected_filename}\"]/ancestor::div[@role='button'][1]"
+        #         else: # Fallback for attachments without meta-text
+        #             element_to_click_xpath = f"//span[text()='{time_str}']/ancestor::div[contains(@class, 'message-')][1]//div[@role='button' and contains(@title, 'Download')]"
                 
-                element_to_click = driver.find_element(By.XPATH, element_to_click_xpath)
-                driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", element_to_click)
-                time.sleep(0.5)
-                driver.execute_script("arguments[0].click();", element_to_click)
-                attachment_filename = _wait_for_download_and_get_filename(expected_filename)
-                if attachment_filename: content = f"📎 Document: {attachment_filename}"
-            except Exception as e:
-                print(f"  - Warning (Doc Download): Could not click element for {expected_filename}. Reason: {e}")
+        #         element_to_click = driver.find_element(By.XPATH, element_to_click_xpath)
+        #         driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", element_to_click)
+        #         time.sleep(0.5)
+        #         driver.execute_script("arguments[0].click();", element_to_click)
+        #         attachment_filename = _wait_for_download_and_get_filename(expected_filename)
+        #         if attachment_filename: content = f"📎 Document: {attachment_filename}"
+        #     except Exception as e:
+        #         print(f"  - Warning (Doc Download): Could not click element for {expected_filename}. Reason: {e}")
 
     elif soup.find('button', {'aria-label': 'Play voice message'}):
         content = "🎤 Voice Message"
@@ -463,31 +568,28 @@ def parse_message_from_html(driver, html_snippet):
     elif soup.find('a', href=lambda h: h and 'maps.google.com' in h):
         content = f"📍 Location: {soup.find('a')['href']}"
 
-    elif image_container or video_container:
-        media_type = "🎥 Video" if video_container else "📷 Image"
+    elif image_container:
+        media_type = "📷 Image"
         try:
-            if has_meta_text:
-                element_to_click_xpath = f"//div[@data-pre-plain-text=\"{meta_text_raw}\"]/ancestor::div[contains(@class, 'message-')][1]//div[@role='button']"
-            else:
-                element_to_click_xpath = f"//span[text()='{time_str}']/ancestor::div[contains(@class, 'message-')][1]//div[@role='button']"
-
-            element_to_click = driver.find_element(By.XPATH, element_to_click_xpath)
+            # if has_meta_text:
+            #     element_to_click_xpath = f"//div[@data-pre-plain-text=\"{meta_text_raw}\"]/ancestor::div[contains(@class, 'message-')][1]//div[@role='button']"
+            # else:
+            #     element_to_click_xpath = f"//span[text()='{time_str}']/ancestor::div[contains(@class, 'message-')][1]//div[@role='button']"
+            element_to_click_xpath_image = f"//div[@role='button' and (@aria-label='Open picture' or @aria-label='Play video')]"
+            element_to_click = driver.find_element(By.XPATH, element_to_click_xpath_image)
             driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", element_to_click)
             time.sleep(0.5)
             
             viewer_opened = False
             try:
                 driver.execute_script("arguments[0].click();", element_to_click)
-                if get_element(driver, "media_viewer_panel", timeout=5):
-                    viewer_opened = True
-                    filename_element = get_element(driver, "media_viewer_filename", timeout=5)
-                    expected_filename = filename_element.text if filename_element else "media_file"
-                    download_button = get_element(driver, "media_viewer_download_button", timeout=5)
-                    if download_button:
-                        driver.execute_script("arguments[0].click();", download_button)
-                        attachment_filename = _wait_for_download_and_get_filename(expected_filename)
-                    content = f"{media_type} ({attachment_filename or 'download failed'})"
-                else: content = f"{media_type} (Viewer did not open)"
+                viewer_opened = True
+                download_button = get_element(driver, "media_viewer_download_button", timeout=5)
+                if download_button:
+                    download_start_time = time.time()
+                    driver.execute_script("arguments[0].click();", download_button)
+                    attachment_filename = _wait_for_newest_file(config.ATTACHMENTS_DIR, download_start_time)
+                content = f"{media_type} ({attachment_filename or 'download failed'})"
             finally:
                 if viewer_opened:
                     close_button = get_element(driver, "media_viewer_close_button", timeout=3, suppress_error=True)
@@ -496,7 +598,28 @@ def parse_message_from_html(driver, html_snippet):
         except Exception as e:
             content = f"{media_type} (Error during download action)"
             print(f"  - Warning (Media Download): {e}")
-
+    elif video_container:
+        media_type="🎥 Video"
+        element_to_click_xpath_video = f"//div[div/span[@data-icon='media-play']]"
+        element_to_click = driver.find_element(By.XPATH, element_to_click_xpath_video)
+        driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", element_to_click)
+        time.sleep(0.5)
+        
+        viewer_opened = False
+        try:
+            driver.execute_script("arguments[0].click();", element_to_click)
+            viewer_opened = True
+            download_button = get_element(driver, "media_viewer_download_button", timeout=5)
+            if download_button:
+                download_start_time = time.time()
+                driver.execute_script("arguments[0].click();", download_button)
+                attachment_filename = _wait_for_newest_file(config.ATTACHMENTS_DIR, download_start_time)
+            content = f"{media_type} ({attachment_filename or 'download failed'})"
+        finally:
+            if viewer_opened:
+                close_button = get_element(driver, "media_viewer_close_button", timeout=3, suppress_error=True)
+                if close_button: driver.execute_script("arguments[0].click();", close_button)
+                time.sleep(1)
     else:
         text_span = soup.find('span', class_='selectable-text')
         if text_span:
@@ -506,26 +629,52 @@ def parse_message_from_html(driver, html_snippet):
 
     # --- Stage 3: Finalize ---
     meta_text_reconstructed = f"[{time_str}, {date_str}] {sender}: "
-    unique_meta_text = f"{meta_text_reconstructed}{content[:50]}"
+    unique_meta_text = f"{meta_text_reconstructed}{content}"
 
     return {"date": date_str, "time": time_str, "sender": sender, "content": content, "meta_text": unique_meta_text, "role": role, "attachment_filename": attachment_filename}
 
 
-# Helper for deterministic download waiting
-def _wait_for_download_and_get_filename(expected_filename_part, timeout=45):
-    print(f"   ...waiting for '{expected_filename_part}' to download...")
-    start_time = time.time()
-    # Sanitize the expected name to match what the OS saves
-    sanitized_name = re.sub(r'[\\/*?:"<>|]', '_', expected_filename_part.split('.')[0])
+def _wait_for_newest_file(download_dir, download_start_time, timeout=45):
+    """
+    Waits for a download to complete and returns the filename of the newest file
+    in the directory created after a specific start time.
+    """
+    print("   ...waiting for a new file to finish downloading...")
+    time.sleep(1) # A brief initial pause
     
-    while time.time() - start_time < timeout:
-        for f in os.listdir(config.ATTACHMENTS_DIR):
-            if not f.endswith('.crdownload') and sanitized_name in f:
-                print(f"   📥 Download complete: {f}")
-                return f
-        time.sleep(1)
-    print(f"   ⚠️ Download timed out for '{expected_filename_part}'.")
-    return None
+    # --- Part 1: Wait for the download to actually finish ---
+    wait_start_time = time.time()
+    while time.time() - wait_start_time < timeout:
+        # Check if any .crdownload (Chrome) or .tmp (Firefox) files exist
+        temp_files = [f for f in os.listdir(download_dir) if f.endswith(('.crdownload', '.tmp'))]
+        if not temp_files:
+            print("   -> No temporary download files found. Proceeding to find the newest file.")
+            break # Exit the loop if no downloads are in progress
+        time.sleep(1) # Wait a second before checking again
+    else: # This 'else' belongs to the 'while' loop
+        print("   -> ⚠️ Timeout: Download in progress file (.crdownload) still present after timeout.")
+        return None
+
+    # --- Part 2: Find the most recent file created after the download was initiated ---
+    try:
+        files = [os.path.join(download_dir, f) for f in os.listdir(download_dir)]
+        
+        # Filter files created *after* the download button was clicked
+        new_files = [f for f in files if os.path.getmtime(f) > download_start_time]
+
+        if not new_files:
+            print("   -> ⚠️ Error: Could not find any new file created after the download started.")
+            return None
+            
+        # Get the absolute newest file from the list of new files
+        newest_file_path = max(new_files, key=os.path.getmtime)
+        newest_filename = os.path.basename(newest_file_path)
+        
+        print(f"   -> 📥 Download identified: {newest_filename}")
+        return newest_filename
+    except Exception as e:
+        print(f"   -> ⚠️ Error while finding the newest file: {e}")
+        return None
     
 
 
@@ -654,6 +803,8 @@ def close_current_chat(driver):
         print(f"❌ An error occurred while trying to close the chat: {e}")
 
 
+#-------------------- DEBUGGING TOOLS --------------------#
+
 def inspect_element_html(driver, selector_key, find_all=False):
     """
     A powerful debugging tool to find an element by its selector key and print its
@@ -747,6 +898,7 @@ def debug_parse_message_structure(msg_element):
 
 
 def analyze_element_structure(msg_element):
+
     """
     Performs a detailed analysis of a message element, checking against all
     known selectors and reporting the outcome of each check.
@@ -808,3 +960,282 @@ def analyze_element_structure(msg_element):
         report['checks']['text'] = "✗ Not Found"
         
     return report
+
+
+
+#---------------------
+
+def find_element_if_exists(parent_element: WebElement, by: By, value: str):
+    """
+    Safely finds a child element within a parent WebElement.
+    Returns the element if found, otherwise returns None.
+    """
+    try:
+        return parent_element.find_element(by, value)
+    except NoSuchElementException:
+        return None
+    
+
+def _handle_document_download(driver, doc_container: WebElement, downloaded_files_set: set):
+    """
+    Workflow for downloading a document. It checks against the provided set of 
+    downloaded files before initiating a click to prevent duplicates.
+    
+    Args:
+        driver: The Selenium WebDriver instance.
+        doc_container: The specific WebElement for the document's clickable area.
+        downloaded_files_set: A set of filenames already logged in the database.
+        
+    Returns:
+        A tuple of (content_string, attachment_filename).
+    """
+    try:
+        full_title = doc_container.get_attribute('title')
+        if not full_title:
+            return "📎 Document (Title not found)", None
+            
+        expected_filename = full_title.removeprefix("Download").strip()
+
+        # --- CHECK IF ALREADY DOWNLOADED ---
+        if expected_filename in downloaded_files_set:
+            print(f"   -> Skipping download: Document '{expected_filename}' already in DB.")
+            return f"📎 Document: {expected_filename}", expected_filename
+
+        # --- PROCEED WITH DOWNLOAD ---
+        print(f"   - Found new document: '{expected_filename}'. Initiating download...")
+        
+        # Record time just before the click
+        download_start_time = time.time()
+        driver.execute_script("arguments[0].click();", doc_container)
+        
+        # Wait for the file to appear in the downloads folder
+        actual_filename = _wait_for_newest_file(config.ATTACHMENTS_DIR, download_start_time)
+        
+        if actual_filename:
+            # Add to the set for the current session to avoid re-downloading if encountered again
+            downloaded_files_set.add(actual_filename)
+            return f"📎 Document: {actual_filename}", actual_filename
+        else:
+            return "📎 Document: download failed", None
+        
+    except Exception as e:
+        print(f"  - Error (Doc Download): An exception occurred. Reason: {e}")
+        return "📎 Document (Error during download action)", None
+    
+
+def _handle_media_viewer_download(driver, media_container: WebElement, media_type: str, downloaded_files_set: set):
+    """
+    Robust workflow for downloading images/videos via the media viewer.
+    It opens the viewer, attempts to find a specific filename to check against the DB,
+    downloads the file, and reliably closes the viewer.
+    """
+    # Define selectors for elements inside the media viewer for clarity
+    viewer_panel_selector = (By.CSS_SELECTOR, "div[data-testid='media-viewer']")
+    download_button_selector = (By.CSS_SELECTOR, "span[data-icon='download']")
+    close_button_selector = (By.CSS_SELECTOR, "span[data-icon='x-viewer']")
+    filename_selector = (By.CSS_SELECTOR, "div[data-testid='media-info-title-text']")
+    
+    wait = WebDriverWait(driver, 15) # Wait up to 15 seconds for elements to appear
+    viewer_was_opened = False
+
+    try:
+        # 1. Open the media viewer
+        driver.execute_script("arguments[0].click();", media_container)
+        viewer_panel = wait.until(EC.visibility_of_element_located(viewer_panel_selector))
+        viewer_was_opened = True
+        print(f"   - {media_type} viewer opened.")
+
+        # 2. Try to find a specific filename in the viewer
+        expected_filename = None
+        try:
+            # Use a shorter timeout here as the filename is not always present
+            filename_element = WebDriverWait(driver, 3).until(EC.visibility_of_element_located(filename_selector))
+            expected_filename = filename_element.text
+            
+            # --- CHECK IF ALREADY DOWNLOADED (if we found a name) ---
+            if expected_filename and expected_filename in downloaded_files_set:
+                print(f"   -> Skipping download: Media '{expected_filename}' already in DB.")
+                return f"{media_type} ({expected_filename})", expected_filename
+        except Exception:
+            # This is common for images that are just pasted into chat
+            print("   - Info: No specific filename found in media viewer. Proceeding with download.")
+
+        # 3. Download the file
+        download_button = wait.until(EC.element_to_be_clickable(download_button_selector))
+        download_start_time = time.time()
+        driver.execute_script("arguments[0].click();", download_button)
+        
+        actual_filename = _wait_for_newest_file(config.ATTACHMENTS_DIR, download_start_time)
+        
+        if actual_filename:
+            downloaded_files_set.add(actual_filename) # Add to session set
+        
+        return f"{media_type} ({actual_filename or 'download failed'})", actual_filename
+
+    except Exception as e:
+        print(f"  - Error (Media Download): An exception occurred during viewer interaction. Reason: {e}")
+        return f"{media_type} (Error during download action)", None
+        
+    finally:
+        # 4. ALWAYS attempt to close the media viewer to prevent the script from getting stuck
+        if viewer_was_opened:
+            try:
+                close_button = wait.until(EC.element_to_be_clickable(close_button_selector))
+                driver.execute_script("arguments[0].click();", close_button)
+                # Confirm it has closed before proceeding
+                wait.until(EC.invisibility_of_element_located(viewer_panel_selector))
+                print("   - Media viewer closed successfully.")
+            except Exception:
+                print("  - WARNING: Could not auto-close media viewer. The script might be stuck. A page refresh might be needed if errors persist.")
+
+
+# (Keep your helper functions: get_element, _wait_for_newest_file, etc.)
+
+# In whatsappSynchronizer.py (or wherever this function lives)
+
+def collect_message_identifiers(driver, stop_at_last_meta_text=None):
+    """
+    PASS 1: Scrolls to the top of the chat, collecting unique message identifiers
+    until it either reaches the top or finds the 'stop_at_last_meta_text'.
+    """
+    print("   --- Pass 1: Scrolling to collect all message identifiers ---")
+    chat_container = get_element(driver, "chat_container", timeout=10)
+    if not chat_container: return []
+    
+    all_meta_texts = set()
+    stop_point_reached = False
+    consecutive_no_new_scrolls = 0
+
+    while not stop_point_reached and consecutive_no_new_scrolls < 4: # Increased patience
+        # Find all divs that contain a message's unique identifier
+        meta_elements = driver.find_elements(By.XPATH, "//div[@data-pre-plain-text]")
+        
+        if not meta_elements:
+            consecutive_no_new_scrolls += 1
+            time.sleep(1)
+            continue
+
+        new_identifiers_found_this_scroll = False
+        # Process from bottom-up of the current view
+        for element in reversed(meta_elements):
+            try:
+                meta_text = element.get_attribute('data-pre-plain-text')
+                
+                # --- CORRECTED LOGIC ---
+                # Check for the stop point first. If we find it, we stop the entire process.
+                if stop_at_last_meta_text and stop_at_last_meta_text == meta_text:
+                    print("⏹️ Reached previously stored last message. Stopping collection.")
+                    stop_point_reached = True
+                    break # Break the inner for-loop
+
+                # If it's not the stop point, check if it's new and add it.
+                if meta_text not in all_meta_texts:
+                    new_identifiers_found_this_scroll = True
+                    all_meta_texts.add(meta_text)
+
+            except StaleElementReferenceException:
+                continue
+        
+        # If the inner loop was broken by finding the stop point, break the outer loop too.
+        if stop_point_reached:
+            break
+
+        # If we didn't find any new identifiers on this screen, increment counter.
+        if not new_identifiers_found_this_scroll:
+            consecutive_no_new_scrolls += 1
+            print(f"   - No new messages on this scroll ({consecutive_no_new_scrolls}/4).")
+        else:
+            consecutive_no_new_scrolls = 0 # Reset if we find new messages
+            
+        # Scroll to the top to load older messages
+        driver.execute_script("arguments[0].scrollTop = 0;", chat_container)
+        time.sleep(2.5) # Wait for older messages to lazy-load
+
+    # Sort the collected identifiers to ensure they are processed chronologically
+    sorted_identifiers = sorted(list(all_meta_texts))
+    print(f"   -> Collected {len(sorted_identifiers)} new message identifiers.")
+    return sorted_identifiers
+
+
+def process_messages_by_identifier(driver, identifiers, downloaded_files_set):
+    """
+    PASS 2: Iterates through a list of unique message identifiers, finds each live
+    element, and passes it to the processing function for interaction and downloading.
+    """
+    print(f"\n   --- Pass 2: Processing {len(identifiers)} messages for content and downloads ---")
+    final_data = []
+    if not identifiers: return []
+
+    for meta_text in tqdm(identifiers, desc="   Parsing messages", unit="msg"):
+        try:
+            # This XPath is precise: it finds the exact message we want to process
+            xpath = f"//div[@data-pre-plain-text=\"{meta_text}\"]/ancestor::div[contains(@class, 'message-')][1]"
+            message_element = WebDriverWait(driver, 10).until(
+                EC.presence_of_element_located((By.XPATH, xpath))
+            )
+            
+            # Scroll the specific element into view just before processing
+            driver.execute_script("arguments[0].scrollIntoView({block: 'center', inline: 'nearest'});", message_element)
+            time.sleep(0.5)
+
+            # Pass the LIVE WebElement and the set of downloaded files to the processor
+            parsed_data = process_live_message_element(driver, message_element, downloaded_files_set)
+            
+            if parsed_data:
+                final_data.append(parsed_data)
+        except Exception as e:
+            print(f"\n  - Error processing message with meta '{meta_text[:30]}...': {e}")
+            continue
+            
+    return final_data
+
+
+def process_live_message_element(driver, message_element: WebElement, downloaded_files_set: set):
+    """
+    Parses a LIVE Selenium WebElement. All find operations are scoped within this element,
+    making them stable and accurate.
+    """
+    # ... (Keep your metadata extraction from the old function, but get HTML from the live element)
+    html_snippet = message_element.get_attribute('innerHTML')
+    soup = BeautifulSoup(html_snippet, 'html.parser')
+    
+    meta_div = soup.find('div', {'data-pre-plain-text': True})
+    if not meta_div: return None
+    
+    meta_text_raw = meta_div['data-pre-plain-text']
+    match = re.match(r"\[(.*?), (.*?)\] (.*?):", meta_text_raw)
+    if not match: return None
+    
+    time_str, date_str, sender = [s.strip() for s in match.groups()]
+    role = 'me' if sender == "You" or (sender and config.YOUR_WHATSAPP_NAME in sender) else 'user'
+    if sender == "You": sender = config.YOUR_WHATSAPP_NAME
+
+    content, attachment_filename = None, None
+
+    # --- THIS IS THE KEY CHANGE ---
+    # Find elements WITHIN the message_element, not the global driver
+    doc_container = find_element_if_exists(message_element, By.CSS_SELECTOR, "div[role='button'][title^='Download']")
+    image_container = find_element_if_exists(message_element, By.CSS_SELECTOR, "div[role='button'][aria-label='Open picture']")
+    video_container = find_element_if_exists(message_element, By.CSS_SELECTOR, "span[data-icon='media-play']")
+
+    if doc_container:
+        content, attachment_filename = _handle_document_download(driver, doc_container, downloaded_files_set)
+
+    elif image_container or video_container:
+        media_type = "🎥 Video" if video_container else "📷 Image"
+        element_to_click = video_container.find_element(By.XPATH, "./ancestor::div[@role='button'][1]") if video_container else image_container
+        content, attachment_filename = _handle_media_viewer_download(driver, element_to_click, media_type, downloaded_files_set)
+
+    # ... (your other elifs for voice, location etc.) ...
+
+    else:
+        text_span = soup.find('span', class_='selectable-text')
+        content = text_span.text.strip() if text_span else None
+
+    if not content: return None
+
+    unique_meta_text = f"[{time_str}, {date_str}] {sender}: {content}"
+    return {"date": date_str, "time": time_str, "sender": sender, "content": content, "meta_text": unique_meta_text, "role": role, "attachment_filename": attachment_filename}
+
+# You will also need find_element_if_exists, _handle_document_download, 
+# and _handle_media_viewer_download from the previous answers.

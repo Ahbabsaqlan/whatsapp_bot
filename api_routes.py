@@ -164,3 +164,16 @@ def get_unreplied_route():
     conversations_rows = db.get_all_unreplied_conversations()
     conversations_dicts = [dict(row) for row in conversations_rows]
     return jsonify(conversations_dicts)
+
+
+@app.route('/attachments', methods=['GET'])
+def get_attachments_route():
+    """
+    API endpoint to retrieve the set of all known attachment filenames from the database.
+    """
+    try:
+        # We need to convert the set to a list for JSON serialization
+        attachment_set = db.get_existing_attachments_from_db()
+        return jsonify(list(attachment_set)), 200
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
