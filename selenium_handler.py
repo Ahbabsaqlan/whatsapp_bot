@@ -384,6 +384,11 @@ def smart_scroll_and_collect(driver, stop_at_last=None):
                         continue
 
                 parsed = parse_message_from_html(driver, html)
+                try:
+                    dismiss_photo_unavailable(driver)  # auto-dismiss popup
+                except Exception:
+                    pass
+
                 if not parsed:
                     seen_html.add(html)
                     continue
@@ -645,6 +650,11 @@ def parse_message_from_html(driver, html_snippet):
     # --- Stage 3: Finalize ---
     meta_text_reconstructed = f"[{time_str}, {date_str}] {sender}: "
     unique_meta_text = f"{meta_text_reconstructed}{content}"
+
+    try:
+        dismiss_photo_unavailable(driver)  # auto-dismiss popup
+    except Exception:
+        pass
 
     return {"date": date_str, "time": time_str, "sender": sender, "content": content, "meta_text": unique_meta_text, "role": role, "attachment_filename": attachment_filename}
 

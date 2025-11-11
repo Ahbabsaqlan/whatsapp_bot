@@ -171,7 +171,7 @@ def run_full_update(driver):
     """Performs a one-time, full scan of all contacts to build the database."""
     print("\n--- Starting Full Database Update ---")
     
-    contacts_to_process = ['Rakib Vaiya']#sh.get_all_contacts(driver)
+    contacts_to_process = sh.get_all_contacts(driver)
     processed_this_session = set()
     for contact_name in tqdm(contacts_to_process, desc="📂 Processing contacts", unit="contact"):
         if contact_name == "WhatsApp": continue
