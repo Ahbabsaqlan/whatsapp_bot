@@ -19,7 +19,7 @@ The system operates in distinct modes: a **Continuous Bot** for parallel syncing
 | Send Automated, Human-like Replies | ✅ Done |
 | REST API for Programmatic Control | ✅ Done |
 | All features in the form functions for integration with any other system(`controller.py`) | ✅ Done |
-| Read and Store Received Images | ⚠️ Incomplete |
+| Read and Store Received Images | ✅ Done  |
 
 ### Advanced Capabilities
 | Feature | Status |
@@ -125,6 +125,7 @@ A command-line interface for power users to directly query the database via the 
 | content | TEXT | Message text |
 | meta_text | TEXT | Unique ID to prevent duplicates |
 | sending_date / stored_date | TEXT | ISO timestamps |
+| attachment_filename | TEXT | Downloaded filename |
 
 ---
 
@@ -348,13 +349,14 @@ Retrieves a list of conversations where the last message came from the user and 
 
 **POST** `/send-message`
 
-Triggers a background Selenium process to send a message via WhatsApp Web.
+Triggers a background Selenium process to send a message via WhatsApp Web.Both param is optional but the text param Will be used as caption if file_path is present.
 
 ### Request Body
 ```json
 {
   "phone_number": "+8801712345678",
-  "text": "Hello from the API!"
+  "text": "Hello from the API!",
+  "file_path": "file_path"
 }
 ```
 
