@@ -62,15 +62,15 @@ def process_unreplied_queue():
                 continue
 
             # --- GEMINI INTEGRATION LOGIC ---
-            print(f"\n   Processing AI reply for '{title}'...")
-            # 1. Fetch conversation history for context
-            history = db.get_prompt_history(number)
-            if not history:
-                print(f"   Could not fetch history for '{title}'. Skipping AI reply.")
-                continue
+            # print(f"\n   Processing AI reply for '{title}'...")
+            # # 1. Fetch conversation history for context
+            # history = db.get_prompt_history(number)
+            # if not history:
+            #     print(f"   Could not fetch history for '{title}'. Skipping AI reply.")
+            #     continue
 
             # 2. Generate a reply using the AI manager
-            reply_text = ai.generate_reply(history, config.YOUR_WHATSAPP_NAME)
+            reply_text = random.choice(config.SIMULATED_AI_REPLIES)  # ai.generate_reply(history, config.YOUR_WHATSAPP_NAME)
 
             # 3. Send the AI-generated reply if it's valid
             if reply_text:

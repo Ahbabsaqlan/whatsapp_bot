@@ -12,6 +12,7 @@ test5.py
 read1.js
 read2.py
 read.py
+ai_manager.py
 *.db
 __pycache__/
 botDB.py
