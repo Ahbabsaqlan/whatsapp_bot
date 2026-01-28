@@ -19,12 +19,20 @@ const WHATSAPP_BOT_URL = process.env.WHATSAPP_BOT_URL || 'http://localhost:5001'
 // Middleware
 app.use(bodyParser.json());
 app.use(bodyParser.urlencoded({ extended: true }));
+
+// SECURITY WARNING: This example code is for demonstration only!
+// In production, you should:
+// 1. Enable secure cookies (secure: true, sameSite: 'strict')
+// 2. Use HTTPS/SSL
+// 3. Add CSRF protection (csurf middleware)
+// 4. Validate and sanitize all user inputs
 app.use(session({
     // SECURITY WARNING: Change this secret key in production!
     // Generate with: node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
     secret: process.env.SESSION_SECRET || 'CHANGE_ME_IN_PRODUCTION_THIS_IS_INSECURE',
     resave: false,
-    saveUninitialized: false
+    saveUninitialized: false,
+    // In production with HTTPS, add: secure: true, sameSite: 'strict'
 }));
 
 // In production, store these in a database

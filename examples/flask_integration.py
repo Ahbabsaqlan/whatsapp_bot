@@ -257,5 +257,6 @@ def template_login():
     '''
 
 if __name__ == '__main__':
-    # In production, use a proper WSGI server
+    # SECURITY WARNING: debug=True is for development only!
+    # In production, set debug=False and use a proper WSGI server like Gunicorn
     app.run(debug=True, port=3000)
