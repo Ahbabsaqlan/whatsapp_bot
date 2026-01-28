@@ -12,7 +12,9 @@ This bot now supports **multi-user lawyer-client communication** for lawyer dire
 - Receive real-time webhook notifications
 - Manage client relationships independently
 
-**[📘 See Lawyer Directory Integration Guide](LAWYER_DIRECTORY_INTEGRATION.md)** for complete documentation and examples.
+**Integration Guides:**
+- **[📘 General Lawyer Directory Integration](LAWYER_DIRECTORY_INTEGRATION.md)** - Complete API reference and examples
+- **[🎯 AinSongjog-Specific Integration](AINSONGJOG_INTEGRATION.md)** - Ready-to-use NestJS modules for AinSongjog platform
 
 ---
 
