@@ -9,7 +9,9 @@ import os
 from datetime import datetime
 
 app = Flask(__name__)
-app.secret_key = 'your-secret-key-change-this'
+# SECURITY WARNING: Change this secret key in production!
+# Use: python -c "import secrets; print(secrets.token_hex(32))"
+app.secret_key = os.environ.get('SECRET_KEY', 'CHANGE_ME_IN_PRODUCTION_THIS_IS_INSECURE')
 
 # WhatsApp Bot API Configuration
 WHATSAPP_BOT_URL = os.environ.get('WHATSAPP_BOT_URL', 'http://localhost:5001')
@@ -63,7 +65,13 @@ def login():
         email = request.form.get('email')
         password = request.form.get('password')
         
-        # In production, verify password from database
+        # SECURITY: In production, use proper password hashing!
+        # from werkzeug.security import check_password_hash
+        # if email in LAWYER_API_KEYS and check_password_hash(stored_hash, password):
+        #     session['lawyer_email'] = email
+        #     return redirect(url_for('dashboard'))
+        
+        # This is INSECURE - for demo purposes only
         if email in LAWYER_API_KEYS:
             session['lawyer_email'] = email
             return redirect(url_for('dashboard'))
@@ -163,6 +171,12 @@ def send_message():
 @app.route('/webhook/whatsapp', methods=['POST'])
 def whatsapp_webhook():
     """Webhook endpoint to receive WhatsApp messages"""
+    # SECURITY: In production, verify webhook signature or use a shared secret
+    # Example: 
+    # webhook_secret = request.headers.get('X-Webhook-Secret')
+    # if webhook_secret != os.environ.get('WEBHOOK_SECRET'):
+    #     return jsonify({'error': 'Unauthorized'}), 401
+    
     data = request.json
     
     event_type = data.get('event_type')

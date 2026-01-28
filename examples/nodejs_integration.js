@@ -1,7 +1,7 @@
-"""
-Example: Node.js/Express Integration
-Demonstrates how to integrate the WhatsApp bot into an Express-based lawyer directory.
-"""
+/*
+ * Example: Node.js/Express Integration
+ * Demonstrates how to integrate the WhatsApp bot into an Express-based lawyer directory.
+ */
 
 // Save this as: app.js
 
@@ -20,7 +20,9 @@ const WHATSAPP_BOT_URL = process.env.WHATSAPP_BOT_URL || 'http://localhost:5001'
 app.use(bodyParser.json());
 app.use(bodyParser.urlencoded({ extended: true }));
 app.use(session({
-    secret: 'your-secret-key-change-this',
+    // SECURITY WARNING: Change this secret key in production!
+    // Generate with: node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+    secret: process.env.SESSION_SECRET || 'CHANGE_ME_IN_PRODUCTION_THIS_IS_INSECURE',
     resave: false,
     saveUninitialized: false
 }));
@@ -28,7 +30,9 @@ app.use(session({
 // In production, store these in a database
 const LAWYER_CREDENTIALS = {
     'lawyer1@example.com': {
-        password: 'password123', // Use bcrypt in production!
+        // SECURITY: Use bcrypt or argon2 for password hashing in production!
+        // Example: password: '$2b$10$...' (bcrypt hash)
+        password: 'password123', // INSECURE - for demo only!
         apiKey: 'your-lawyer-1-api-key'
     }
 };
@@ -202,6 +206,13 @@ app.get('/api/webhooks', requireAuth, async (req, res) => {
 
 // Webhook receiver endpoint (no auth required, as it's called by WhatsApp bot)
 app.post('/webhook/whatsapp', (req, res) => {
+    // SECURITY: In production, verify webhook signature or use a shared secret
+    // Example:
+    // const webhookSecret = req.headers['x-webhook-secret'];
+    // if (webhookSecret !== process.env.WEBHOOK_SECRET) {
+    //     return res.status(401).json({ error: 'Unauthorized' });
+    // }
+    
     const { event_type, data, lawyer_id } = req.body;
     
     console.log(`Received webhook: ${event_type}`);
@@ -237,6 +248,7 @@ To use this example:
 2. Create a .env file:
    WHATSAPP_BOT_URL=http://localhost:5001
    PORT=3000
+   SESSION_SECRET=your-random-secret-here
 
 3. Run:
    node app.js

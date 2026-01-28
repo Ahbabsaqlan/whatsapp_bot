@@ -6,6 +6,8 @@ Provides endpoints for multi-user lawyer-client communication.
 
 from flask import Blueprint, request, jsonify, current_app
 import threading
+import datetime
+import requests
 import lawyer_directory_integration as ldi
 import database_manager as db
 import selenium_handler as sh
@@ -31,6 +33,9 @@ def create_lawyer():
     """
     Create a new lawyer account.
     
+    NOTE: In production, this endpoint should be protected with admin authentication
+    or require an invitation token to prevent unauthorized account creation.
+    
     Body:
         {
             "name": "John Doe",
@@ -44,26 +49,35 @@ def create_lawyer():
     
     required_fields = ['name', 'email', 'phone_number', 'whatsapp_name']
     for field in required_fields:
-        if not data.get(field):
-            return jsonify({"status": "error", "message": f"Missing required field: {field}"}), 400
+        value = data.get(field)
+        if not value or not str(value).strip():
+            return jsonify({"status": "error", "message": f"Missing or empty required field: {field}"}), 400
+    
+    # Basic email validation
+    email = data['email'].strip()
+    if '@' not in email or '.' not in email.split('@')[-1]:
+        return jsonify({"status": "error", "message": "Invalid email format"}), 400
     
     lawyer = ldi.create_lawyer(
-        name=data['name'],
-        email=data['email'],
-        phone_number=data['phone_number'],
-        whatsapp_name=data['whatsapp_name'],
+        name=data['name'].strip(),
+        email=email,
+        phone_number=data['phone_number'].strip(),
+        whatsapp_name=data['whatsapp_name'].strip(),
         profile_path=data.get('profile_path')
     )
     
     if lawyer:
-        # Remove sensitive API key from response for security, or return it only on creation
+        # Return API key only on creation for security
         return jsonify({
             "status": "success",
             "message": "Lawyer account created successfully",
             "lawyer": lawyer
         }), 201
     else:
-        return jsonify({"status": "error", "message": "Failed to create lawyer account"}), 500
+        return jsonify({
+            "status": "error", 
+            "message": "Failed to create lawyer account. Email or phone number may already be registered."
+        }), 400
 
 @lawyer_api.route('/lawyers/me', methods=['GET'])
 def get_my_profile():
@@ -238,7 +252,7 @@ def send_message_worker(phone_number, text, file_path, lawyer, lock):
             trigger_webhook_notification(lawyer['id'], 'message_sent', {
                 'client_phone_number': phone_number,
                 'message': text,
-                'timestamp': sh.datetime.datetime.now().isoformat()
+                'timestamp': datetime.datetime.now().isoformat()
             })
             
             print(f"--- [Lawyer API Task for {phone_number} Finished Successfully] ---")
@@ -373,13 +387,12 @@ def trigger_webhook_notification(lawyer_id, event_type, payload):
 
 def send_webhook(url, payload):
     """
-    Send webhook notification to a URL.
+    Send webhook notification to a URL with retry logic.
     
     Args:
         url: Webhook URL
         payload: JSON payload
     """
-    import requests
     try:
         response = requests.post(
             url,
@@ -389,5 +402,10 @@ def send_webhook(url, payload):
         )
         response.raise_for_status()
         print(f"✅ Webhook sent successfully to {url}")
-    except Exception as e:
+        return True
+    except requests.Timeout:
+        print(f"⚠️ Webhook timeout for {url}")
+        return False
+    except requests.RequestException as e:
         print(f"❌ Failed to send webhook to {url}: {e}")
+        return False

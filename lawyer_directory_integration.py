@@ -8,6 +8,7 @@ import sqlite3
 import datetime
 import hashlib
 import secrets
+import json
 from database_manager import get_db_connection, normalize_phone_number
 
 def init_lawyer_directory_db():
@@ -174,33 +175,46 @@ def create_or_get_client(name, phone_number, email=None):
         email: Optional client email
         
     Returns:
-        Client ID
+        Client ID or None if failed
     """
     conn = get_db_connection()
     cursor = conn.cursor()
     now_iso = datetime.datetime.now().isoformat()
     normalized_number = normalize_phone_number(phone_number)
     
-    # Check if client exists
-    cursor.execute("SELECT id FROM Clients WHERE phone_number = ?", (normalized_number,))
-    existing = cursor.fetchone()
-    
-    if existing:
-        client_id = existing['id']
-        # Update name if provided
-        cursor.execute("UPDATE Clients SET name = ?, updated = ?, email = COALESCE(?, email) WHERE id = ?", 
-                      (name, now_iso, email, client_id))
-    else:
-        cursor.execute("""
-            INSERT INTO Clients (name, phone_number, email, created, updated)
-            VALUES (?, ?, ?, ?, ?)
-        """, (name, normalized_number, email, now_iso, now_iso))
-        client_id = cursor.lastrowid
-        print(f"✅ Created client: {name} (ID: {client_id})")
-    
-    conn.commit()
-    conn.close()
-    return client_id
+    try:
+        # Check if client exists
+        cursor.execute("SELECT id FROM Clients WHERE phone_number = ?", (normalized_number,))
+        existing = cursor.fetchone()
+        
+        if existing:
+            client_id = existing['id']
+            # Update name and email if provided
+            if email:
+                cursor.execute("UPDATE Clients SET name = ?, email = ?, updated = ? WHERE id = ?", 
+                              (name, email, now_iso, client_id))
+            else:
+                cursor.execute("UPDATE Clients SET name = ?, updated = ? WHERE id = ?", 
+                              (name, now_iso, client_id))
+        else:
+            cursor.execute("""
+                INSERT INTO Clients (name, phone_number, email, created, updated)
+                VALUES (?, ?, ?, ?, ?)
+            """, (name, normalized_number, email, now_iso, now_iso))
+            client_id = cursor.lastrowid
+            print(f"✅ Created client: {name} (ID: {client_id})")
+        
+        conn.commit()
+        return client_id
+        
+    except sqlite3.IntegrityError as e:
+        print(f"❌ Database error creating client: {e}")
+        return None
+    except Exception as e:
+        print(f"❌ Unexpected error creating client: {e}")
+        return None
+    finally:
+        conn.close()
 
 def link_lawyer_client(lawyer_id, client_id, conversation_id=None):
     """
@@ -366,7 +380,6 @@ def queue_webhook_notification(webhook_id, payload):
     cursor = conn.cursor()
     now_iso = datetime.datetime.now().isoformat()
     
-    import json
     payload_str = json.dumps(payload)
     
     cursor.execute("""
