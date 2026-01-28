@@ -4,6 +4,16 @@ This project automates WhatsApp Web using Selenium and provides a **REST API** f
 
 The system operates in distinct modes: a **Continuous Bot** for parallel syncing and replying, a **Manual Full Scan** to build your database, and a suite of **API Tools** for direct interaction.
 
+## 🏢 **NEW: Lawyer Directory Integration**
+
+This bot now supports **multi-user lawyer-client communication** for lawyer directory web applications! Each lawyer can:
+- Have their own WhatsApp account and client list
+- Send/receive messages through a secure API
+- Receive real-time webhook notifications
+- Manage client relationships independently
+
+**[📘 See Lawyer Directory Integration Guide](LAWYER_DIRECTORY_INTEGRATION.md)** for complete documentation and examples.
+
 ---
 
 ## 🚀 Features
