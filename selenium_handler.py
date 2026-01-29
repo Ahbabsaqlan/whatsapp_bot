@@ -27,8 +27,13 @@ from database_manager import normalize_phone_number
 def load_selectors(filename="selectors.json"):
     """Loads selectors from a JSON file."""
     try:
-        with open(filename, 'r', encoding='utf-8') as f:
-            print(f"📄 Loading selectors from '{filename}'...")
+        # Get the directory where this script is located
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        # Create the full path to the selectors file
+        selector_path = os.path.join(script_dir, filename)
+        
+        with open(selector_path, 'r', encoding='utf-8') as f:
+            print(f"📄 Loading selectors from '{selector_path}'...")
             return json.load(f)
     except FileNotFoundError:
         print(f"❌ FATAL ERROR: Selector file '{filename}' not found. Please create it next to the script.")
