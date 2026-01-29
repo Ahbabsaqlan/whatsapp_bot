@@ -51,16 +51,32 @@ async sendAppointmentReminder(appointmentId: string) {
     throw new Error(`Appointment with ID ${appointmentId} not found`);
   }
   
+  // ⚠️ IMPORTANT: Customize the message based on YOUR Appointment entity fields
+  // Check src/appointments/entities/appointment.entity.ts for actual field names
+  
   // Send WhatsApp reminder to client
   await this.whatsappService.sendMessage(
     appointment.lawyer.email,
     {
       clientPhoneNumber: appointment.client.clientProfile.mobileNumber,
-      text: `Reminder: You have an appointment with ${appointment.lawyer.firstName} ${appointment.lawyer.lastName} on ${appointment.date} at ${appointment.time}. Location: ${appointment.location}`,
+      // Option 1: Generic message (always works)
+      text: `Reminder: You have an upcoming appointment. Please check your schedule.`,
+      
+      // Option 2: Customize based on your entity (uncomment and modify):
+      // text: `Reminder: Appointment with ${appointment.lawyer.firstName} ${appointment.lawyer.lastName}`,
+      
+      // Option 3: Include date/time if your entity has those fields:
+      // text: `Reminder: Appointment on ${appointment.scheduledDate} at ${appointment.startTime}`,
     },
   );
 }
 ```
+
+**Note on Entity Fields:** The field names `date`, `time`, and `location` are examples. Check your actual `Appointment` entity to see what fields are available. Common variations include:
+- Date fields: `scheduledDate`, `appointmentDate`, `date`, `scheduledAt`
+- Time fields: `startTime`, `endTime`, `time`, `timeSlot`
+- Other fields: `location`, `status`, `notes`, `duration`
+
 
 **Complete AppointmentsService Example:**
 
@@ -95,7 +111,8 @@ export class AppointmentsService {
       appointment.lawyer.email,
       {
         clientPhoneNumber: appointment.client.clientProfile.mobileNumber,
-        text: `Reminder: You have an appointment with ${appointment.lawyer.firstName} ${appointment.lawyer.lastName} on ${appointment.date} at ${appointment.time}. Location: ${appointment.location}`,
+        // Use a generic message or customize based on your entity fields
+        text: `Reminder: You have an upcoming appointment. Please check your schedule.`,
       },
     );
   }
@@ -342,6 +359,49 @@ After making these changes:
 
 ## Common Issues
 
+### Issue: "Property 'date' does not exist on type 'Appointment'"
+
+**Problem:** The example code uses generic field names (`date`, `time`, `location`) that don't match your actual Appointment entity.
+
+**Solution:**
+
+1. **Check your Appointment entity** - Open `src/appointments/entities/appointment.entity.ts` and look at the actual field names:
+
+   ```typescript
+   @Entity('appointments')
+   export class Appointment {
+     @PrimaryGeneratedColumn('uuid')
+     id: string;
+     
+     // Look for date/time fields - they might be named differently:
+     @Column()
+     scheduledDate: string;  // Could be: date, appointmentDate, scheduledAt
+     
+     @Column()
+     startTime: string;      // Could be: time, appointmentTime, timeSlot
+     
+     // ... other fields
+   }
+   ```
+
+2. **Update your message template** to use the actual field names:
+
+   ```typescript
+   // Option 1: Use actual field names from your entity
+   text: `Reminder: Appointment on ${appointment.scheduledDate} at ${appointment.startTime}`,
+   
+   // Option 2: Use a generic message (no field references needed)
+   text: `Reminder: You have an upcoming appointment. Please check your schedule.`,
+   
+   // Option 3: Format the date if it's a Date object
+   text: `Reminder: Appointment on ${new Date(appointment.scheduledAt).toLocaleDateString()}`,
+   ```
+
+3. **Common field name variations:**
+   - **Date fields:** `date`, `scheduledDate`, `appointmentDate`, `scheduledAt`, `appointmentDateTime`
+   - **Time fields:** `time`, `startTime`, `endTime`, `appointmentTime`, `timeSlot`
+   - **Location fields:** `location`, `address`, `venue`
+
 ### Issue: "Circular dependency detected"
 
 If you get circular dependency warnings, make sure you're importing WhatsAppModule (not WhatsAppService) in your module files.
@@ -358,6 +418,29 @@ You need to add the `whatsappApiKey` field to your LawyerProfile entity:
 @Column({ nullable: true, select: false })
 whatsappApiKey: string;
 ```
+
+## How to Find Your Entity Field Names
+
+If you're unsure what fields are available on your entities:
+
+1. **Open the entity file:**
+   ```bash
+   # For Appointment entity:
+   cat src/appointments/entities/appointment.entity.ts
+   
+   # For User entity:
+   cat src/users/entities/user.entity.ts
+   ```
+
+2. **Look for `@Column()` decorators** - these define the fields
+
+3. **Check TypeScript types** - your IDE should show available fields with autocomplete
+
+4. **Use console logging** (temporary):
+   ```typescript
+   const appointment = await this.appointmentsRepository.findOne(...);
+   console.log('Appointment fields:', Object.keys(appointment));
+   ```
 
 ## Need More Help?
 

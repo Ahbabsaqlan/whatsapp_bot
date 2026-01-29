@@ -30,11 +30,17 @@ async sendAppointmentReminder(appointmentId: string) {
     throw new Error(`Appointment not found`);
   }
   
+  // ⚠️ IMPORTANT: Check your Appointment entity for actual field names!
+  // Common variations: scheduledDate, appointmentDate, startTime, etc.
+  // Update the template string below to match YOUR entity fields
+  
   await this.whatsappService.sendMessage(
     appointment.lawyer.email,
     {
       clientPhoneNumber: appointment.client.clientProfile.mobileNumber,
-      text: `Reminder: Appointment on ${appointment.date} at ${appointment.time}`,
+      text: `Reminder: You have an appointment scheduled. Please check your appointment details.`,
+      // Example with actual fields (customize based on your entity):
+      // text: `Reminder: Appointment on ${appointment.scheduledDate} at ${appointment.startTime}`,
     },
   );
 }
@@ -154,5 +160,33 @@ You should see:
 ```
 ✅ Registered API keys for X lawyers
 ```
+
+---
+
+## 🔧 Troubleshooting
+
+### Error: Property 'date' or 'time' does not exist on type 'Appointment'
+
+**Problem:** The example code uses generic field names that might not match your entity.
+
+**Solution:** Check your actual Appointment entity fields:
+
+1. Open `src/appointments/entities/appointment.entity.ts`
+2. Look for the date/time field names (e.g., `scheduledDate`, `appointmentDate`, `startTime`, `endTime`)
+3. Update the message template in your service:
+
+```typescript
+// Example if your entity has 'scheduledDate' and 'startTime':
+text: `Reminder: Appointment on ${appointment.scheduledDate} at ${appointment.startTime}`,
+
+// Or use a generic message without field references:
+text: `Reminder: You have an upcoming appointment. Please check your schedule.`,
+```
+
+**Common field name variations:**
+- Date: `date`, `scheduledDate`, `appointmentDate`, `scheduledAt`
+- Time: `time`, `startTime`, `appointmentTime`, `timeSlot`
+
+---
 
 See `AINSONGJOG_TYPESCRIPT_FIXES.md` for detailed explanations.
