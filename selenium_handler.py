@@ -89,10 +89,13 @@ def open_whatsapp():
     }
     options.add_experimental_option("prefs", prefs)
     
-    # --- Step 3: Standard user profile and window size options ---
+    # CRITICAL SETTINGS FOR RENDER/DOCKER
+    options.add_argument("--headless=new") # Run without a UI window
+    options.add_argument("--no-sandbox")   # Required for Docker
+    options.add_argument("--disable-dev-shm-usage") # Fix memory issues
+    options.add_argument("--disable-gpu")
+    options.add_argument("--window-size=1920,1080")
     options.add_argument(f"--user-data-dir={os.path.abspath(session_dir)}")
-    options.add_argument("--profile-directory=Default")
-    options.add_argument("--start-maximized")
 
     # --- Step 4: Robust driver installation and startup ---
     driver_path = None
