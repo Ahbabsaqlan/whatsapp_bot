@@ -341,6 +341,43 @@ this.whatsappService.registerLawyerApiKey(
 );
 ```
 
+### "Nest cannot create the WhatsAppModule instance" - Undefined module error
+
+**Error Message:**
+```
+The module at index [2] of the WhatsAppModule "imports" array is undefined.
+```
+
+**Cause:** You uncommented a module in the imports array but forgot to uncomment the import statement at the top of the file.
+
+**Solution:** See the detailed fix guide: `FIX_UNDEFINED_MODULE_ERROR.md`
+
+**Quick Fix:**
+1. Open `src/whatsapp/whatsapp.module.ts`
+2. If you don't need NotificationsModule or UsersModule yet, keep them commented out in BOTH places
+3. Or uncomment BOTH the import statement AND the module in the imports array
+
+**Minimal Working Configuration:**
+```typescript
+import { Module } from '@nestjs/common';
+import { ConfigModule } from '@nestjs/config';
+import { WhatsAppService } from './whatsapp.service';
+import { WhatsAppController } from './whatsapp.controller';
+import { WhatsAppWebhookController } from './webhook.controller';
+
+@Module({
+  imports: [
+    ConfigModule, // Only this - no other modules needed initially
+  ],
+  controllers: [WhatsAppController, WhatsAppWebhookController],
+  providers: [WhatsAppService],
+  exports: [WhatsAppService],
+})
+export class WhatsAppModule {}
+```
+
+See `FIX_UNDEFINED_MODULE_ERROR.md` for complete troubleshooting steps.
+
 ### Webhook not working
 
 1. Check that the webhook URL is publicly accessible
@@ -370,6 +407,11 @@ npm install --save-dev @types/node
 ## Support
 
 For detailed integration guide, see [AINSONGJOG_INTEGRATION.md](../AINSONGJOG_INTEGRATION.md)
+
+For troubleshooting guides:
+- [Fix Undefined Module Error](../FIX_UNDEFINED_MODULE_ERROR.md) - NestJS module import issues
+- [Fix TypeScript Errors](../QUICK_FIX_TYPESCRIPT_ERRORS.md) - Compilation errors
+- [Fix Appointment Field Errors](../FIX_APPOINTMENT_FIELDS_ERROR.md) - Entity field issues
 
 For WhatsApp bot documentation, see:
 - [Lawyer Directory Integration](../LAWYER_DIRECTORY_INTEGRATION.md)

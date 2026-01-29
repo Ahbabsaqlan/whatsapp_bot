@@ -4,14 +4,24 @@ import { WhatsAppService } from './whatsapp.service';
 import { WhatsAppController } from './whatsapp.controller';
 import { WhatsAppWebhookController } from './webhook.controller';
 
-// Uncomment these imports when integrating with your AinSongjog modules
+// ⚠️ IMPORTANT: When uncommenting imports below, follow these steps:
+// 1. Uncomment BOTH the import statement AND the module in the imports array
+// 2. Make sure the paths match your project structure
+// 3. Remove the comment syntax (//) from both lines together
+// 
+// Example:
+// import { NotificationsModule } from '../notifications/notifications.module';
+// ...and in imports array below...
+// NotificationsModule,
+
+// Step 1: Uncomment these import statements if you need them
 // import { NotificationsModule } from '../notifications/notifications.module';
 // import { UsersModule } from '../users/users.module';
 
 @Module({
   imports: [
     ConfigModule,
-    // Uncomment these when ready to integrate
+    // Step 2: Uncomment the corresponding modules here (match with Step 1)
     // NotificationsModule,
     // UsersModule,
   ],
