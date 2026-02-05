@@ -27,8 +27,13 @@ from database_manager import normalize_phone_number
 def load_selectors(filename="selectors.json"):
     """Loads selectors from a JSON file."""
     try:
-        with open(filename, 'r', encoding='utf-8') as f:
-            print(f"📄 Loading selectors from '{filename}'...")
+        # Get the directory where this script is located
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        # Create the full path to the selectors file
+        selector_path = os.path.join(script_dir, filename)
+        
+        with open(selector_path, 'r', encoding='utf-8') as f:
+            print(f"📄 Loading selectors from '{selector_path}'...")
             return json.load(f)
     except FileNotFoundError:
         print(f"❌ FATAL ERROR: Selector file '{filename}' not found. Please create it next to the script.")
@@ -67,16 +72,26 @@ def get_element(driver, key, timeout=10, find_all=False, wait_condition=EC.prese
         return [] if find_all else None
 
 
-def open_whatsapp():
+def open_whatsapp(profile_path=None):
     """
     Opens WhatsApp Web, now configured for automatic, non-interactive downloads.
+    
+    Args:
+        profile_path: Optional custom profile path for multi-user support.
+                     If None, uses the default session directory.
     """
     # --- Step 1: Ensure the attachments directory exists ---
     # This reads the path from your config file.
     if not os.path.exists(config.ATTACHMENTS_DIR):
         os.makedirs(config.ATTACHMENTS_DIR)
 
-    session_dir = ensure_session_dir()
+    # Use custom profile path if provided, otherwise use default
+    if profile_path:
+        session_dir = os.path.abspath(profile_path)
+        os.makedirs(session_dir, exist_ok=True)
+    else:
+        session_dir = ensure_session_dir()
+    
     options = Options()
     
     # --- Step 2: Set Chrome options for automatic downloads ---
