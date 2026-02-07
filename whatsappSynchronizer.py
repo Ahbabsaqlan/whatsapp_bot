@@ -389,23 +389,25 @@ def debug_ui_elements():
 
 
 if __name__ == "__main__":
-    # 1. Start the API server in a background thread
-    # We use 0.0.0.0 and port 8000 for Koyeb
+    # 1. Attach the global lock to the Flask config so routes can access it
+    app.config['TASK_LOCK'] = TASK_LOCK 
+    
+    # 2. Start the API server in a background thread
+    # Note: We bind to 0.0.0.0:8000 for Koyeb
     api_thread = threading.Thread(
         target=lambda: app.run(host='0.0.0.0', port=8000, debug=False, use_reloader=False), 
         daemon=True
     )
     api_thread.start()
     
-    # 2. Wait a few seconds for the server to warm up
+    # 3. Wait for server to warm up
     time.sleep(5)
     
-    # 3. Initialize the database DIRECTLY (don't use requests here to avoid connection errors)
+    # 4. Initialize the database directly
     import database_manager
     database_manager.init_db()
     print("✅ Database Initialized.")
 
-    # 4. Start the Bot automatically (Sync & AI Auto-Reply)
-    # This replaces the need to type '1' in the menu
+    # 5. Start the Bot automatically
     print("🤖 Starting Cloud Bot Mode (Sync & Auto-Reply)...")
     run_parallel_tasks(only_sync=False)

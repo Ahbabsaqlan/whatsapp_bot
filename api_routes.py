@@ -203,12 +203,22 @@ def login_page():
 @app.route('/get-qr')
 def get_qr():
     global login_driver
+    # Get the lock from config
     task_lock = current_app.config.get('TASK_LOCK')
     
-    # ACQUIRE LOCK: Don't start QR if Sync Task is running
+    # SAFETY: If for some reason the lock isn't in config, 
+    # we import it directly from the synchronizer
+    if task_lock is None:
+        from whatsappSynchronizer import TASK_LOCK as backup_lock
+        task_lock = backup_lock
+
+    # Now try to acquire the lock
     acquired = task_lock.acquire(blocking=False)
     if not acquired:
-        return jsonify({"status": "error", "message": "System busy syncing messages. Try again in 1 minute."}), 503
+        return jsonify({
+            "status": "error", 
+            "message": "System busy syncing messages. Please wait 60 seconds and try again."
+        }), 503
 
     try:
         if login_driver:
