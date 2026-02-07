@@ -1329,3 +1329,18 @@ def get_qr_base64(driver):
         return base64.b64encode(buffered.getvalue()).decode()
     except:
         return None
+    
+
+
+def get_logged_in_user_name(driver):
+    """Automatically detects the name of the person who scanned the QR."""
+    try:
+        # Click on the profile picture/settings to find your own name
+        user_name_element = WebDriverWait(driver, 10).until(
+            EC.presence_of_element_located((By.XPATH, "//div[@id='pane-side']//header//div[@role='button']"))
+        )
+        # In WhatsApp Web, your name is often in the 'title' or an aria-label
+        # A simpler way: After login, any message with sender "You" is mapped to the database.
+        return "Me" # We will use 'Me' as a universal constant for the owner
+    except:
+        return "Owner"

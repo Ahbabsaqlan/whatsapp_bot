@@ -19,3 +19,4 @@ botDB.py
 venv/
 run_server.py
 attachments/
+.env
