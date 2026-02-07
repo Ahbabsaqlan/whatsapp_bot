@@ -1288,71 +1288,76 @@ from PIL import Image
 
 # selenium_handler.py
 
+# selenium_handler.py
+
+def get_qr_base64(driver):
+    """Captures the QR code with high patience for slow cloud servers."""
+    try:
+        # Increase wait to 60 seconds because Koyeb Nano is slow
+        wait = WebDriverWait(driver, 60)
+        print("⏳ Waiting for QR canvas to render...")
+        
+        # Wait for canvas and ensures it's visible
+        canvas = wait.until(EC.visibility_of_element_located((By.TAG_NAME, "canvas")))
+        
+        # Extra sleep to ensure the QR pixels are actually drawn
+        time.sleep(5) 
+        
+        # Get image data directly from browser memory
+        base64_image = driver.execute_script(
+            "return document.querySelector('canvas').toDataURL('image/png').substring(22);"
+        )
+        
+        if len(base64_image) < 100: # If the image is too small, it's a blank canvas
+            print("⚠️ Canvas found but QR image not yet drawn. Retrying in 5s...")
+            time.sleep(5)
+            base64_image = driver.execute_script(
+                "return document.querySelector('canvas').toDataURL('image/png').substring(22);"
+            )
+            
+        return base64_image
+    except Exception as e:
+        print(f"❌ QR Capture Failed: {e}")
+        return None
+
 def open_whatsapp(headless=True):
-    import os, platform, subprocess
-    from selenium.webdriver.chrome.service import Service
-    from webdriver_manager.chrome import ChromeDriverManager
+    # REMOVED the 'pkill' from here as it interferes with simultaneous tasks
     from storage_manager import download_session
-
-    # 1. KILL DANGLING PROCESSES (Crucial for 512MB RAM)
-    if platform.system() != "Windows":
-        try:
-            subprocess.run(["pkill", "-9", "chrome"], stderr=subprocess.DEVNULL)
-            subprocess.run(["pkill", "-9", "chromedriver"], stderr=subprocess.DEVNULL)
-        except: pass
-
     download_session()
 
     options = Options()
     if headless:
         options.add_argument("--headless=new")
     
-    # --- ULTRA LOW RAM SETTINGS ---
+    # Standard Cloud Stability Flags
     options.add_argument("--no-sandbox")
-    options.add_argument("--disable-dev-shm-usage") # Uses disk instead of RAM for temp files
+    options.add_argument("--disable-dev-shm-usage")
     options.add_argument("--disable-gpu")
-    options.add_argument("--disable-extensions")
-    options.add_argument("--window-size=1280,720") # Smaller window = less RAM
-    options.add_argument("--js-flags='--max-old-space-size=256'") # Cap Javascript RAM
+    options.add_argument("--window-size=1280,720")
+    # Tell Chrome to stay calm on low memory
+    options.add_argument("--memory-pressure-off")
     
-    options.add_argument(f"--user-data-dir={os.path.abspath('whatsapp_automation_profile')}")
+    session_dir = os.path.abspath("whatsapp_automation_profile")
+    options.add_argument(f"--user-data-dir={session_dir}")
 
     try:
+        from webdriver_manager.chrome import ChromeDriverManager
+        from selenium.webdriver.chrome.service import Service
+        
         print("🌐 Resolving ChromeDriver...")
         driver_path = ChromeDriverManager().install()
         
-        # Bulletproof Fix for the Linux "Exec format error"
+        # Fix for Linux Exec Format
         if platform.system() != "Windows":
             if "THIRD_PARTY_NOTICES" in driver_path or os.path.isdir(driver_path):
                 parent_dir = os.path.dirname(driver_path) if "THIRD_PARTY_NOTICES" in driver_path else driver_path
                 driver_path = os.path.join(parent_dir, "chromedriver")
             os.chmod(driver_path, 0o755)
 
-        print(f"📂 Launching: {driver_path}")
         service = Service(executable_path=driver_path)
         return webdriver.Chrome(service=service, options=options)
     except Exception as e:
-        print(f"❌ Chrome Crash: {e}")
-        return None
-
-def get_qr_base64(driver):
-    """Captures the QR code with retries and better headless support."""
-    try:
-        # 1. Wait for the canvas to exist
-        wait = WebDriverWait(driver, 30)
-        canvas = wait.until(EC.presence_of_element_located((By.TAG_NAME, "canvas")))
-        
-        # 2. Give WhatsApp a moment to actually draw the QR inside the canvas
-        time.sleep(3) 
-        
-        # 3. Instead of cropping a screenshot (which fails in headless), 
-        # get the image data directly from the canvas via JavaScript! (Much more reliable)
-        base64_image = driver.execute_script(
-            "return document.querySelector('canvas').toDataURL('image/png').substring(22);"
-        )
-        return base64_image
-    except Exception as e:
-        print(f"❌ QR Capture Error: {e}")
+        print(f"❌ Failed to start Chrome: {e}")
         return None
     
 

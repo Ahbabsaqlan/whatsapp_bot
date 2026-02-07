@@ -39,24 +39,35 @@
         const qrImg = document.getElementById('qr-img');
         const statusText = document.getElementById('status');
 
+        // Inside the script tag in login.html
+
         startBtn.onclick = async () => {
             startBtn.classList.add('hidden');
             loader.classList.remove('hidden');
+            statusText.innerText = "Launching Chrome on Server (this takes ~40s)...";
             
             try {
-                const resp = await fetch('/get-qr');
+                // Set a very long timeout for the fetch request
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => controller.abort(), 90000); // 90 seconds
+
+                const resp = await fetch('/get-qr', { signal: controller.signal });
                 const data = await resp.json();
                 
-                if(data.qr) {
+                clearTimeout(timeoutId);
+
+                if(data.status === 'success' && data.qr) {
                     qrImg.src = "data:image/png;base64," + data.qr;
                     loader.classList.add('hidden');
                     qrContainer.classList.remove('hidden');
                     startPolling();
                 } else {
-                    alert("Failed to load QR. Please refresh and try again.");
+                    alert(data.message || "Failed to load QR. Server might be under heavy load.");
+                    window.location.reload();
                 }
             } catch (e) {
-                alert("Error connecting to server.");
+                alert("Server took too long to respond. Please wait 10 seconds and refresh.");
+                window.location.reload();
             }
         };
 

@@ -200,41 +200,39 @@ def login_page():
 
 # api_routes.py
 
+# api_routes.py
+
 @app.route('/get-qr')
 def get_qr():
     global login_driver
-    # Get the lock from config
     task_lock = current_app.config.get('TASK_LOCK')
     
-    # SAFETY: If for some reason the lock isn't in config, 
-    # we import it directly from the synchronizer
     if task_lock is None:
         from whatsappSynchronizer import TASK_LOCK as backup_lock
         task_lock = backup_lock
 
-    # Now try to acquire the lock
+    # Try to get the lock
     acquired = task_lock.acquire(blocking=False)
     if not acquired:
-        return jsonify({
-            "status": "error", 
-            "message": "System busy syncing messages. Please wait 60 seconds and try again."
-        }), 503
+        return jsonify({"status": "error", "message": "Bot is busy syncing. Try again in 1 minute."}), 503
 
     try:
         if login_driver:
             try: login_driver.quit()
             except: pass
-        
+            
         login_driver = sh.open_whatsapp(headless=True)
         qr_data = sh.get_qr_base64(login_driver)
         
         if qr_data:
             return jsonify({"status": "success", "qr": qr_data})
-        return jsonify({"status": "error", "message": "QR generation failed"}), 404
-    finally:
-        # We DON'T release the lock here because we need the driver to stay 
-        # alive for the user to scan. We release it in /check-auth or if error.
-        if not qr_data: task_lock.release()
+        else:
+            # If QR failed, release lock immediately
+            if task_lock.locked(): task_lock.release()
+            return jsonify({"status": "error", "message": "Timed out waiting for QR code. Please try again."}), 408
+    except Exception as e:
+        if task_lock.locked(): task_lock.release()
+        return jsonify({"status": "error", "message": str(e)}), 500
 
 @app.route('/check-auth')
 def check_auth():
