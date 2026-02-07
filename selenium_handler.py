@@ -71,73 +71,73 @@ def get_element(driver, key, timeout=10, find_all=False, wait_condition=EC.prese
         return [] if find_all else None
 
 
-def open_whatsapp():
-    """
-    Opens WhatsApp Web with high-precision driver detection to fix WinError 193.
-    """
-    BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-    session_dir = os.path.join(BASE_DIR, "whatsapp_automation_profile")
-    attachments_dir = os.path.join(BASE_DIR, "attachments")
+# def open_whatsapp():
+#     """
+#     Opens WhatsApp Web with high-precision driver detection to fix WinError 193.
+#     """
+#     BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+#     session_dir = os.path.join(BASE_DIR, "whatsapp_automation_profile")
+#     attachments_dir = os.path.join(BASE_DIR, "attachments")
 
-    if not os.path.exists(attachments_dir):
-        os.makedirs(attachments_dir)
+#     if not os.path.exists(attachments_dir):
+#         os.makedirs(attachments_dir)
 
-    options = Options()
-    options.add_argument("--no-sandbox")
-    options.add_argument("--disable-dev-shm-usage")
-    options.add_argument("--disable-gpu")
-    options.add_argument("--remote-allow-origins=*")
-    options.add_argument("--window-size=1920,1080")
-    options.add_argument("--force-device-scale-factor=1")
-    options.add_argument(f"--user-data-dir={session_dir}")
+#     options = Options()
+#     options.add_argument("--no-sandbox")
+#     options.add_argument("--disable-dev-shm-usage")
+#     options.add_argument("--disable-gpu")
+#     options.add_argument("--remote-allow-origins=*")
+#     options.add_argument("--window-size=1920,1080")
+#     options.add_argument("--force-device-scale-factor=1")
+#     options.add_argument(f"--user-data-dir={session_dir}")
 
-    # --- Step 4: High-Precision Driver Setup ---
-    try:
-        from webdriver_manager.chrome import ChromeDriverManager
-        from selenium.webdriver.chrome.service import Service
+#     # --- Step 4: High-Precision Driver Setup ---
+#     try:
+#         from webdriver_manager.chrome import ChromeDriverManager
+#         from selenium.webdriver.chrome.service import Service
         
-        print("🌐 Resolving ChromeDriver...")
-        # 1. Get path from manager
-        raw_path = ChromeDriverManager().install()
+#         print("🌐 Resolving ChromeDriver...")
+#         # 1. Get path from manager
+#         raw_path = ChromeDriverManager().install()
         
-        # 2. Path Cleanup Logic
-        driver_path = raw_path
-        if os.path.isdir(driver_path):
-            # If it gave us a folder, look for the exe inside
-            for root, dirs, files in os.walk(driver_path):
-                for file in files:
-                    if file == "chromedriver.exe":
-                        driver_path = os.path.join(root, file)
-                        break
+#         # 2. Path Cleanup Logic
+#         driver_path = raw_path
+#         if os.path.isdir(driver_path):
+#             # If it gave us a folder, look for the exe inside
+#             for root, dirs, files in os.walk(driver_path):
+#                 for file in files:
+#                     if file == "chromedriver.exe":
+#                         driver_path = os.path.join(root, file)
+#                         break
 
-        # 3. Final verification
-        if not driver_path.lower().endswith(".exe"):
-            driver_path += ".exe"
+#         # 3. Final verification
+#         if not driver_path.lower().endswith(".exe"):
+#             driver_path += ".exe"
 
-        print(f"📂 Attempting to launch: {driver_path}")
+#         print(f"📂 Attempting to launch: {driver_path}")
         
-        if not os.path.exists(driver_path):
-            raise Exception(f"Driver file does not exist at {driver_path}")
+#         if not os.path.exists(driver_path):
+#             raise Exception(f"Driver file does not exist at {driver_path}")
             
-        if os.path.getsize(driver_path) < 1000:
-            raise Exception(f"Driver file at {driver_path} is corrupted (too small).")
+#         if os.path.getsize(driver_path) < 1000:
+#             raise Exception(f"Driver file at {driver_path} is corrupted (too small).")
 
-        service = Service(executable_path=driver_path)
-        driver = webdriver.Chrome(service=service, options=options)
+#         service = Service(executable_path=driver_path)
+#         driver = webdriver.Chrome(service=service, options=options)
         
-        print("📱 Navigating to WhatsApp Web...")
-        driver.get("https://web.whatsapp.com")
+#         print("📱 Navigating to WhatsApp Web...")
+#         driver.get("https://web.whatsapp.com")
         
-        print("... Please scan the QR code if not already logged in...")
-        if not get_element(driver, "login_check", timeout=60):
-            print("❌ Login timed out."); driver.quit(); return None
+#         print("... Please scan the QR code if not already logged in...")
+#         if not get_element(driver, "login_check", timeout=60):
+#             print("❌ Login timed out."); driver.quit(); return None
         
-        print("✅ Login successful."); return driver
+#         print("✅ Login successful."); return driver
 
-    except Exception as e:
-        print(f"\n❌ DRIVER ERROR: {e}")
-        print("💡 TIP: Delete your 'C:\\Users\\YourName\\.wdm' folder and try again.")
-        return None
+#     except Exception as e:
+#         print(f"\n❌ DRIVER ERROR: {e}")
+#         print("💡 TIP: Delete your 'C:\\Users\\YourName\\.wdm' folder and try again.")
+#         return None
 
 
 # def _wait_for_download_and_get_filename(expected_filename, timeout=45):
@@ -1298,6 +1298,7 @@ def open_whatsapp(headless=True):
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
     options.add_argument("--window-size=1920,1080") # Critical for QR screenshots
+    options.add_argument("--force-device-scale-factor=1")
     options.add_argument(f"--user-data-dir={os.path.abspath('whatsapp_automation_profile')}")
 
     service = Service(ChromeDriverManager().install())
