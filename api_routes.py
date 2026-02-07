@@ -204,19 +204,20 @@ app = Flask(__name__, template_folder=template_dir)
 def login_page():
     return render_template('login.html')
 
+# api_routes.py
+
 @app.route('/trigger-qr')
 def trigger_qr():
-    """
-    Starts Chrome in a background thread to avoid HTTP 408 Timeout.
-    Accepts ?session_id=User123
-    """
+    # Get ID from URL, or default to "Owner" if missing
     session_id = request.args.get('session_id')
     if not session_id:
-        return jsonify({"status": "error", "message": "Session ID is required"}), 400
+        session_id = "Owner" # <--- Fixes the 400 Error
 
     # 1. Check if system is busy
     if bot_state.state["status"] == "LOGIN_MODE":
         return jsonify({"status": "busy", "message": "Another login is in progress. Please wait."})
+
+    # ... (Rest of the function remains the same) ...
 
     # 2. Define the background task
     def background_browser_launch(user_id):

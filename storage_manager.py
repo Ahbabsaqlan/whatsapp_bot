@@ -8,7 +8,7 @@ supabase = create_client(url, key, options=ClientOptions(postgrest_client_timeou
 
 BUCKET_NAME = "whatsapp_data"
 
-def upload_session(session_id):
+def upload_session(session_id="Owner"):
     """Zips a SPECIFIC session folder and uploads it as session_id.zip"""
     local_dir = f"profiles/{session_id}" # e.g., profiles/user123
     
@@ -27,7 +27,7 @@ def upload_session(session_id):
     os.remove(f"{session_id}.zip")
     print(f"✅ Session '{session_id}' saved to Cloud.")
 
-def download_session(session_id):
+def download_session(session_id="Owner"):
     """Downloads session_id.zip and extracts it to profiles/session_id"""
     local_dir = f"profiles/{session_id}"
     
