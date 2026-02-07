@@ -1286,66 +1286,52 @@ import base64
 from io import BytesIO
 from PIL import Image
 
-# selenium_handler.py
-
-# selenium_handler.py
-
 def get_qr_base64(driver):
-    """Captures the QR code with high patience for slow cloud servers."""
+    """
+    Extracts QR code directly from the Canvas element via JavaScript.
+    This works perfectly in Headless mode where screenshots fail.
+    """
     try:
-        # Increase wait to 60 seconds because Koyeb Nano is slow
-        wait = WebDriverWait(driver, 60)
-        print("⏳ Waiting for QR canvas to render...")
+        print("⏳ Waiting for QR Code Canvas...")
+        wait = WebDriverWait(driver, 60) # Wait up to 60 seconds
+        canvas = wait.until(EC.presence_of_element_located((By.TAG_NAME, "canvas")))
         
-        # Wait for canvas and ensures it's visible
-        canvas = wait.until(EC.visibility_of_element_located((By.TAG_NAME, "canvas")))
+        # Wait a moment for the QR pixels to actually draw
+        time.sleep(3)
         
-        # Extra sleep to ensure the QR pixels are actually drawn
-        time.sleep(5) 
-        
-        # Get image data directly from browser memory
-        base64_image = driver.execute_script(
+        # Execute JS to extract image data
+        qr_b64 = driver.execute_script(
             "return document.querySelector('canvas').toDataURL('image/png').substring(22);"
         )
-        
-        if len(base64_image) < 100: # If the image is too small, it's a blank canvas
-            print("⚠️ Canvas found but QR image not yet drawn. Retrying in 5s...")
-            time.sleep(5)
-            base64_image = driver.execute_script(
-                "return document.querySelector('canvas').toDataURL('image/png').substring(22);"
-            )
-            
-        return base64_image
+        return qr_b64
     except Exception as e:
-        print(f"❌ QR Capture Failed: {e}")
+        print(f"❌ QR Extraction failed: {e}")
         return None
 
-# selenium_handler.py
-
 def open_whatsapp(headless=True):
-    # No pkill here - let the OS handle memory
     options = Options()
     if headless:
         options.add_argument("--headless=new")
     
-    # --- LOW RAM EXTREME SETTINGS ---
+    # Low-Resource Flags for Cloud Hosting
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
     options.add_argument("--disable-gpu")
     options.add_argument("--disable-extensions")
-    options.add_argument("--disable-software-rasterizer")
-    options.add_argument("--window-size=800,600") # Tiny window to save RAM
-    options.add_argument("--blink-settings=imagesEnabled=false") # Don't load contact pictures
+    options.add_argument("--window-size=1024,768")
     
+    # Path setup
     session_dir = os.path.abspath("whatsapp_automation_profile")
     options.add_argument(f"--user-data-dir={session_dir}")
 
     try:
         from webdriver_manager.chrome import ChromeDriverManager
         from selenium.webdriver.chrome.service import Service
+        
+        # Install Driver
         driver_path = ChromeDriverManager().install()
         
-        # Linux Binary Fix
+        # Linux Path Fix (Koyeb specific)
         if platform.system() != "Windows":
             if "THIRD_PARTY_NOTICES" in driver_path or os.path.isdir(driver_path):
                 parent_dir = os.path.dirname(driver_path) if "THIRD_PARTY_NOTICES" in driver_path else driver_path
@@ -1355,12 +1341,14 @@ def open_whatsapp(headless=True):
         service = Service(executable_path=driver_path)
         driver = webdriver.Chrome(service=service, options=options)
         
-        # Set a low page load timeout
-        driver.set_page_load_timeout(60)
+        # Set a long page load timeout for slow networks
+        driver.set_page_load_timeout(120)
+        
+        print("📱 Navigating to WhatsApp Web...")
         driver.get("https://web.whatsapp.com")
         return driver
     except Exception as e:
-        print(f"❌ Chrome Error: {e}")
+        print(f"❌ Chrome Crash: {e}")
         return None
     
 

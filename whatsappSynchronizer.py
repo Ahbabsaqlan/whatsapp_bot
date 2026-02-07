@@ -84,7 +84,14 @@ def process_unreplied_queue():
     except Exception as e:
         print(f"\n   ❌ An error occurred during queue processing: {e}")
 
+import bot_state # Import the state manager
+
 def run_sync_task():
+    # BLOCKER: If we are in login mode, DO NOT SYNC
+    if bot_state.state["status"] == "LOGIN_MODE":
+        print("⏳ Skipping sync: User is currently logging in via Frontend.")
+        return
+
     """
     This scheduled task now also acquires the lock before running, ensuring it
     waits if a manual API call is in progress.

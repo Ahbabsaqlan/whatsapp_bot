@@ -187,84 +187,84 @@ def get_attachments_route():
 
 
 
-# api_routes.py
-from flask import render_template, jsonify
+from flask import Flask, jsonify, render_template
+import threading
 import selenium_handler as sh
-
-login_driver = None # Global to keep track of the login process
+import bot_state # Import our new state manager
+import time
 
 @app.route('/login-page')
 def login_page():
-    # Make sure you create a folder named 'templates' with login.html inside
     return render_template('login.html')
 
-# api_routes.py
-import threading
+@app.route('/trigger-qr')
+def trigger_qr():
+    """Starts the browser in a background thread."""
+    if bot_state.state["status"] == "LOGIN_MODE":
+        return jsonify({"status": "processing", "message": "Browser already starting..."})
 
-# Global state for login
-qr_state = {"status": "idle", "qr": None, "error": None}
-
-@app.route('/get-qr')
-def get_qr():
-    global login_driver, qr_state
-    task_lock = current_app.config.get('TASK_LOCK')
-    
-    if qr_state["status"] == "starting":
-        return jsonify({"status": "starting", "message": "Browser is already warming up..."})
-
-    def background_qr_task():
-        global login_driver, qr_state
-        acquired = task_lock.acquire(blocking=True, timeout=5)
-        if not acquired:
-            qr_state = {"status": "error", "error": "System busy syncing. Try again in 2 mins."}
-            return
-
-        try:
-            qr_state = {"status": "starting", "qr": None, "error": None}
-            if login_driver:
-                try: login_driver.quit()
+    def background_browser_launch():
+        with bot_state.BROWSER_LOCK:
+            bot_state.state["status"] = "LOGIN_MODE"
+            bot_state.state["qr_code"] = None
+            
+            # Close existing driver if any
+            if bot_state.state["driver"]:
+                try: bot_state.state["driver"].quit()
                 except: pass
             
-            login_driver = sh.open_whatsapp(headless=True)
-            if not login_driver:
-                raise Exception("Chrome failed to start")
-                
-            qr_data = sh.get_qr_base64(login_driver)
-            if qr_data:
-                qr_state = {"status": "ready", "qr": qr_data}
+            # Open new driver
+            driver = sh.open_whatsapp(headless=True)
+            if driver:
+                bot_state.state["driver"] = driver
+                # Attempt to get QR
+                qr = sh.get_qr_base64(driver)
+                if qr:
+                    bot_state.state["qr_code"] = qr
+                else:
+                    bot_state.state["status"] = "ERROR_QR"
             else:
-                qr_state = {"status": "error", "error": "WhatsApp load timeout."}
-        except Exception as e:
-            qr_state = {"status": "error", "error": str(e)}
-            if task_lock.locked(): task_lock.release()
+                bot_state.state["status"] = "ERROR_BROWSER"
 
-    # Start the heavy lifting in a separate thread
-    threading.Thread(target=background_qr_task).start()
-    return jsonify({"status": "starting"})
+    # Start thread
+    threading.Thread(target=background_browser_launch).start()
+    return jsonify({"status": "started", "message": "Browser launching in background..."})
 
 @app.route('/poll-qr')
 def poll_qr():
-    global qr_state
-    return jsonify(qr_state)
+    """Frontend calls this every 2 seconds to check progress."""
+    status = bot_state.state["status"]
+    qr = bot_state.state["qr_code"]
+    
+    if status == "LOGIN_MODE" and qr is None:
+        return jsonify({"status": "loading", "message": "Chrome is starting (Wait 20-40s)..."})
+    elif status == "LOGIN_MODE" and qr is not None:
+        return jsonify({"status": "ready", "qr": qr})
+    elif status.startswith("ERROR"):
+        return jsonify({"status": "error", "message": "Failed to load WhatsApp."})
+    elif status == "AUTHENTICATED":
+        return jsonify({"status": "authenticated"})
+    else:
+        return jsonify({"status": "idle"})
 
 @app.route('/check-auth')
 def check_auth():
-    global login_driver, qr_state
-    task_lock = current_app.config.get('TASK_LOCK')
+    """Checks if login was successful."""
+    driver = bot_state.state["driver"]
+    if not driver: return jsonify({"status": "idle"})
     
-    if not login_driver: return jsonify({"status": "idle"})
+    # Check if we are logged in
+    is_logged_in = sh.get_element(driver, "login_check", timeout=1, suppress_error=True)
     
-    # Check for login success
-    is_fully_loaded = sh.get_element(login_driver, "login_check", timeout=1, suppress_error=True)
-    
-    if is_fully_loaded:
-        time.sleep(5)
+    if is_logged_in:
+        bot_state.state["status"] = "AUTHENTICATED"
+        # Save to cloud
         from storage_manager import upload_session
-        upload_session() 
-        login_driver.quit()
-        login_driver = None
-        qr_state = {"status": "idle", "qr": None}
-        if task_lock.locked(): task_lock.release()
+        upload_session()
+        
+        # Close the login browser so the Sync Task can take over later
+        driver.quit()
+        bot_state.state["driver"] = None
         return jsonify({"status": "authenticated"})
-    
+        
     return jsonify({"status": "waiting"})
