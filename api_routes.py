@@ -5,7 +5,13 @@ import threading
 import selenium_handler as sh
 import time
 
-app = Flask(__name__)
+# api_routes.py
+import os
+from flask import Flask, request, jsonify, render_template
+
+# This ensures Flask looks in the correct directory for your login.html
+template_dir = os.path.abspath('templates')
+app = Flask(__name__, template_folder=template_dir)
 
 @app.route('/send-message', methods=['POST'])
 def send_message_endpoint():
@@ -221,3 +227,4 @@ def check_auth():
         return jsonify({"status": "authenticated"})
     
     return jsonify({"status": "waiting"})
+

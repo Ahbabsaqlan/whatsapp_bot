@@ -2,7 +2,8 @@
 import requests
 import json
 
-API_BASE_URL = "http://127.0.0.1:5001"
+# Change port to 8000 to match the new Flask setting
+API_BASE_URL = "http://localhost:8000"
 
 def init_db():
     """Calls the API to initialize the database."""

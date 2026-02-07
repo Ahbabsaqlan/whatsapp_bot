@@ -350,41 +350,64 @@ def debug_ui_elements():
 #             driver.quit()
 #         print("--- 🛠️ Exited Analysis Mode ---")
 
-if __name__ == "__main__":
-    api_thread = threading.Thread(target=run_api_server, args=(config.YOUR_WHATSAPP_NAME, TASK_LOCK), daemon=True)
-    api_thread.start()
-    time.sleep(2)
-    db.init_db()
+# if __name__ == "__main__":
+#     api_thread = threading.Thread(target=run_api_server, args=(config.YOUR_WHATSAPP_NAME, TASK_LOCK), daemon=True)
+#     api_thread.start()
+#     time.sleep(2)
+#     db.init_db()
     
-    while True:
-        print("\n" + "="*40 + "\n       WhatsApp Automation Menu\n" + "="*40)
-        print("0. Start Bot (Continuous Sync Only)")
-        print("1. Start Bot (Continuous Sync & AI Auto-Reply)")
-        print("2. Update Database (One-Time Full Scan)")
-        print("3. Database API Tools")
-        print("4. Debug UI Elements")
-        print("5. Exit")
-        choice = input("Enter your choice (0-5): ").strip()
+#     while True:
+#         print("\n" + "="*40 + "\n       WhatsApp Automation Menu\n" + "="*40)
+#         print("0. Start Bot (Continuous Sync Only)")
+#         print("1. Start Bot (Continuous Sync & AI Auto-Reply)")
+#         print("2. Update Database (One-Time Full Scan)")
+#         print("3. Database API Tools")
+#         print("4. Debug UI Elements")
+#         print("5. Exit")
+#         choice = input("Enter your choice (0-5): ").strip()
         
-        if choice == '0':
-            run_parallel_tasks(True)
-        elif choice == '1':
-            run_parallel_tasks(False)
-        elif choice == '2': 
-            with TASK_LOCK:
-                driver = None
-                try:
-                    driver = sh.open_whatsapp()
-                    if driver:
-                        run_full_update(driver)
-                finally:
-                    if driver:
-                        driver.quit()
-        elif choice == '3':
-            run_api_tools()
-        elif choice == '4':
-            debug_ui_elements()
-        elif choice == '5': 
-            print("👋 Exiting program."); break
-        else: 
-            print("❌ Invalid choice.")
+#         if choice == '0':
+#             run_parallel_tasks(True)
+#         elif choice == '1':
+#             run_parallel_tasks(False)
+#         elif choice == '2': 
+#             with TASK_LOCK:
+#                 driver = None
+#                 try:
+#                     driver = sh.open_whatsapp()
+#                     if driver:
+#                         run_full_update(driver)
+#                 finally:
+#                     if driver:
+#                         driver.quit()
+#         elif choice == '3':
+#             run_api_tools()
+#         elif choice == '4':
+#             debug_ui_elements()
+#         elif choice == '5': 
+#             print("👋 Exiting program."); break
+#         else: 
+#             print("❌ Invalid choice.")
+
+
+if __name__ == "__main__":
+    # 1. Start the API server in a background thread
+    # We use 0.0.0.0 and port 8000 for Koyeb
+    api_thread = threading.Thread(
+        target=lambda: app.run(host='0.0.0.0', port=8000, debug=False, use_reloader=False), 
+        daemon=True
+    )
+    api_thread.start()
+    
+    # 2. Wait a few seconds for the server to warm up
+    time.sleep(5)
+    
+    # 3. Initialize the database DIRECTLY (don't use requests here to avoid connection errors)
+    import database_manager
+    database_manager.init_db()
+    print("✅ Database Initialized.")
+
+    # 4. Start the Bot automatically (Sync & AI Auto-Reply)
+    # This replaces the need to type '1' in the menu
+    print("🤖 Starting Cloud Bot Mode (Sync & Auto-Reply)...")
+    run_parallel_tasks(only_sync=False)
