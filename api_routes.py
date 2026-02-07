@@ -201,30 +201,43 @@ def login_page():
 @app.route('/get-qr')
 def get_qr():
     global login_driver
-    if login_driver: login_driver.quit()
-    
-    # Start driver in headless mode to capture QR
-    login_driver = sh.open_whatsapp(headless=True)
-    qr_data = sh.get_qr_base64(login_driver)
-    
-    if qr_data:
-        return jsonify({"status": "success", "qr": qr_data})
-    return jsonify({"status": "error", "message": "Failed to generate QR"})
+    try:
+        # If a driver is already running, kill it to start fresh
+        if login_driver:
+            try: login_driver.quit()
+            except: pass
+        
+        print("🌐 Launching browser for QR...")
+        login_driver = sh.open_whatsapp(headless=True)
+        
+        qr_data = sh.get_qr_base64(login_driver)
+        if qr_data:
+            return jsonify({"status": "success", "qr": qr_data})
+        
+        return jsonify({"status": "error", "message": "QR not found on page"}), 404
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+# api_routes.py
 
 @app.route('/check-auth')
 def check_auth():
     global login_driver
     if not login_driver: return jsonify({"status": "idle"})
     
-    # Check if the search box (login_check) appeared
-    is_logged_in = sh.get_element(login_driver, "login_check", timeout=1, suppress_error=True)
+    # Wait for the main "pane-side" (chat list) to appear. 
+    # This proves the login is fully complete.
+    is_fully_loaded = sh.get_element(login_driver, "login_check", timeout=1, suppress_error=True)
     
-    if is_logged_in:
+    if is_fully_loaded:
+        print("🔥 Login detected! Waiting for session to stabilize...")
+        time.sleep(5) # Give it 5 seconds to write session files to disk
+        
         from storage_manager import upload_session
-        upload_session() # Save to Supabase
+        upload_session() 
+        
         login_driver.quit()
         login_driver = None
         return jsonify({"status": "authenticated"})
     
     return jsonify({"status": "waiting"})
-

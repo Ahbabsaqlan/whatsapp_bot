@@ -1348,29 +1348,23 @@ def open_whatsapp(headless=True):
         return None
 
 def get_qr_base64(driver):
-    """Captures the QR code element and returns it as Base64 string."""
+    """Captures the QR code with retries and better headless support."""
     try:
-        # Wait for QR code canvas to appear
-        WebDriverWait(driver, 20).until(EC.presence_of_element_located((By.TAG_NAME, "canvas")))
-        qr_element = driver.find_element(By.TAG_NAME, "canvas")
+        # 1. Wait for the canvas to exist
+        wait = WebDriverWait(driver, 30)
+        canvas = wait.until(EC.presence_of_element_located((By.TAG_NAME, "canvas")))
         
-        # Take a screenshot of the whole page, then crop to the QR
-        location = qr_element.location
-        size = qr_element.size
-        png = driver.get_screenshot_as_png()
+        # 2. Give WhatsApp a moment to actually draw the QR inside the canvas
+        time.sleep(3) 
         
-        img = Image.open(BytesIO(png))
-        left = location['x']
-        top = location['y']
-        right = location['x'] + size['width']
-        bottom = location['y'] + size['height']
-        
-        img = img.crop((left, top, right, bottom))
-        
-        buffered = BytesIO()
-        img.save(buffered, format="PNG")
-        return base64.b64encode(buffered.getvalue()).decode()
-    except:
+        # 3. Instead of cropping a screenshot (which fails in headless), 
+        # get the image data directly from the canvas via JavaScript! (Much more reliable)
+        base64_image = driver.execute_script(
+            "return document.querySelector('canvas').toDataURL('image/png').substring(22);"
+        )
+        return base64_image
+    except Exception as e:
+        print(f"❌ QR Capture Error: {e}")
         return None
     
 
