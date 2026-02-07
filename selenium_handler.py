@@ -88,6 +88,7 @@ def open_whatsapp():
     options.add_argument("--disable-gpu")
     options.add_argument("--remote-allow-origins=*")
     options.add_argument("--window-size=1920,1080")
+    options.add_argument("--force-device-scale-factor=1")
     options.add_argument(f"--user-data-dir={session_dir}")
 
     # --- Step 4: High-Precision Driver Setup ---
