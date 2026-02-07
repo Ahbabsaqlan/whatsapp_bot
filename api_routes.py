@@ -199,49 +199,62 @@ def login_page():
     return render_template('login.html')
 
 # api_routes.py
+import threading
 
-# api_routes.py
+# Global state for login
+qr_state = {"status": "idle", "qr": None, "error": None}
 
 @app.route('/get-qr')
 def get_qr():
-    global login_driver
+    global login_driver, qr_state
     task_lock = current_app.config.get('TASK_LOCK')
     
-    if task_lock is None:
-        from whatsappSynchronizer import TASK_LOCK as backup_lock
-        task_lock = backup_lock
+    if qr_state["status"] == "starting":
+        return jsonify({"status": "starting", "message": "Browser is already warming up..."})
 
-    # Try to get the lock
-    acquired = task_lock.acquire(blocking=False)
-    if not acquired:
-        return jsonify({"status": "error", "message": "Bot is busy syncing. Try again in 1 minute."}), 503
+    def background_qr_task():
+        global login_driver, qr_state
+        acquired = task_lock.acquire(blocking=True, timeout=5)
+        if not acquired:
+            qr_state = {"status": "error", "error": "System busy syncing. Try again in 2 mins."}
+            return
 
-    try:
-        if login_driver:
-            try: login_driver.quit()
-            except: pass
+        try:
+            qr_state = {"status": "starting", "qr": None, "error": None}
+            if login_driver:
+                try: login_driver.quit()
+                except: pass
             
-        login_driver = sh.open_whatsapp(headless=True)
-        qr_data = sh.get_qr_base64(login_driver)
-        
-        if qr_data:
-            return jsonify({"status": "success", "qr": qr_data})
-        else:
-            # If QR failed, release lock immediately
+            login_driver = sh.open_whatsapp(headless=True)
+            if not login_driver:
+                raise Exception("Chrome failed to start")
+                
+            qr_data = sh.get_qr_base64(login_driver)
+            if qr_data:
+                qr_state = {"status": "ready", "qr": qr_data}
+            else:
+                qr_state = {"status": "error", "error": "WhatsApp load timeout."}
+        except Exception as e:
+            qr_state = {"status": "error", "error": str(e)}
             if task_lock.locked(): task_lock.release()
-            return jsonify({"status": "error", "message": "Timed out waiting for QR code. Please try again."}), 408
-    except Exception as e:
-        if task_lock.locked(): task_lock.release()
-        return jsonify({"status": "error", "message": str(e)}), 500
+
+    # Start the heavy lifting in a separate thread
+    threading.Thread(target=background_qr_task).start()
+    return jsonify({"status": "starting"})
+
+@app.route('/poll-qr')
+def poll_qr():
+    global qr_state
+    return jsonify(qr_state)
 
 @app.route('/check-auth')
 def check_auth():
-    global login_driver
+    global login_driver, qr_state
     task_lock = current_app.config.get('TASK_LOCK')
     
-    if not login_driver: 
-        return jsonify({"status": "idle"})
+    if not login_driver: return jsonify({"status": "idle"})
     
+    # Check for login success
     is_fully_loaded = sh.get_element(login_driver, "login_check", timeout=1, suppress_error=True)
     
     if is_fully_loaded:
@@ -250,8 +263,7 @@ def check_auth():
         upload_session() 
         login_driver.quit()
         login_driver = None
-        
-        # RELEASE LOCK: Allow Sync Task to resume
+        qr_state = {"status": "idle", "qr": None}
         if task_lock.locked(): task_lock.release()
         return jsonify({"status": "authenticated"})
     

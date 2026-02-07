@@ -1320,22 +1320,22 @@ def get_qr_base64(driver):
         print(f"❌ QR Capture Failed: {e}")
         return None
 
-def open_whatsapp(headless=True):
-    # REMOVED the 'pkill' from here as it interferes with simultaneous tasks
-    from storage_manager import download_session
-    download_session()
+# selenium_handler.py
 
+def open_whatsapp(headless=True):
+    # No pkill here - let the OS handle memory
     options = Options()
     if headless:
         options.add_argument("--headless=new")
     
-    # Standard Cloud Stability Flags
+    # --- LOW RAM EXTREME SETTINGS ---
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
     options.add_argument("--disable-gpu")
-    options.add_argument("--window-size=1280,720")
-    # Tell Chrome to stay calm on low memory
-    options.add_argument("--memory-pressure-off")
+    options.add_argument("--disable-extensions")
+    options.add_argument("--disable-software-rasterizer")
+    options.add_argument("--window-size=800,600") # Tiny window to save RAM
+    options.add_argument("--blink-settings=imagesEnabled=false") # Don't load contact pictures
     
     session_dir = os.path.abspath("whatsapp_automation_profile")
     options.add_argument(f"--user-data-dir={session_dir}")
@@ -1343,11 +1343,9 @@ def open_whatsapp(headless=True):
     try:
         from webdriver_manager.chrome import ChromeDriverManager
         from selenium.webdriver.chrome.service import Service
-        
-        print("🌐 Resolving ChromeDriver...")
         driver_path = ChromeDriverManager().install()
         
-        # Fix for Linux Exec Format
+        # Linux Binary Fix
         if platform.system() != "Windows":
             if "THIRD_PARTY_NOTICES" in driver_path or os.path.isdir(driver_path):
                 parent_dir = os.path.dirname(driver_path) if "THIRD_PARTY_NOTICES" in driver_path else driver_path
@@ -1355,9 +1353,14 @@ def open_whatsapp(headless=True):
             os.chmod(driver_path, 0o755)
 
         service = Service(executable_path=driver_path)
-        return webdriver.Chrome(service=service, options=options)
+        driver = webdriver.Chrome(service=service, options=options)
+        
+        # Set a low page load timeout
+        driver.set_page_load_timeout(60)
+        driver.get("https://web.whatsapp.com")
+        return driver
     except Exception as e:
-        print(f"❌ Failed to start Chrome: {e}")
+        print(f"❌ Chrome Error: {e}")
         return None
     
 

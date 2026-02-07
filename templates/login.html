@@ -41,35 +41,46 @@
 
         // Inside the script tag in login.html
 
+        // Replace the startBtn.onclick logic in login.html
+
         startBtn.onclick = async () => {
             startBtn.classList.add('hidden');
             loader.classList.remove('hidden');
-            statusText.innerText = "Launching Chrome on Server (this takes ~40s)...";
+            statusText.innerText = "Initializing Cloud Browser...";
             
-            try {
-                // Set a very long timeout for the fetch request
-                const controller = new AbortController();
-                const timeoutId = setTimeout(() => controller.abort(), 90000); // 90 seconds
-
-                const resp = await fetch('/get-qr', { signal: controller.signal });
+            const startResp = await fetch('/get-qr');
+            
+            // Begin Polling for the QR image
+            const qrPoller = setInterval(async () => {
+                const resp = await fetch('/poll-qr');
                 const data = await resp.json();
                 
-                clearTimeout(timeoutId);
-
-                if(data.status === 'success' && data.qr) {
+                if (data.status === 'starting') {
+                    statusText.innerText = "WhatsApp is loading on server... (usually 30-60s)";
+                } else if (data.status === 'ready') {
+                    clearInterval(qrPoller);
                     qrImg.src = "data:image/png;base64," + data.qr;
                     loader.classList.add('hidden');
                     qrContainer.classList.remove('hidden');
-                    startPolling();
-                } else {
-                    alert(data.message || "Failed to load QR. Server might be under heavy load.");
+                    startAuthPolling(); // Start the original auth checker
+                } else if (data.status === 'error') {
+                    clearInterval(qrPoller);
+                    alert("Error: " + data.error);
                     window.location.reload();
                 }
-            } catch (e) {
-                alert("Server took too long to respond. Please wait 10 seconds and refresh.");
-                window.location.reload();
-            }
+            }, 3000);
         };
+
+        function startAuthPolling() {
+            setInterval(async () => {
+                const resp = await fetch('/check-auth');
+                const data = await resp.json();
+                if(data.status === 'authenticated') {
+                    statusText.innerText = "✅ Success! Archiving session...";
+                    setTimeout(() => { window.location.reload(); }, 3000);
+                }
+            }, 3000);
+        }
 
         function startPolling() {
             const interval = setInterval(async () => {
