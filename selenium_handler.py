@@ -1309,18 +1309,31 @@ def get_qr_base64(driver):
         return None
 
 def open_whatsapp(headless=True, session_id="default"):
+    from storage_manager import download_session
+    # Download existing session if available
+    download_session(session_id)
+
     options = Options()
     if headless:
         options.add_argument("--headless=new")
     
-    # Low-Resource Flags for Cloud Hosting
+    # --- KOYEB OPTIMIZATIONS (Crucial) ---
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
     options.add_argument("--disable-gpu")
     options.add_argument("--disable-extensions")
+    options.add_argument("--disable-software-rasterizer")
+    options.add_argument("--disable-notifications")
+    options.add_argument("--disable-popup-blocking")
+    
+    # Disable images/css for faster loading (QR is a canvas, so it still works)
+    prefs = {"profile.managed_default_content_settings.images": 2}
+    # options.add_experimental_option("prefs", prefs) # Uncomment if QR fails to appear, but canvas usually needs images enabled
+    
+    # Use a small window size to save RAM
     options.add_argument("--window-size=1024,768")
     
-    # Path setup
+    # Session Path
     base_path = os.getcwd()
     profile_path = os.path.join(base_path, "profiles", session_id)
     options.add_argument(f"--user-data-dir={profile_path}")
@@ -1329,10 +1342,9 @@ def open_whatsapp(headless=True, session_id="default"):
         from webdriver_manager.chrome import ChromeDriverManager
         from selenium.webdriver.chrome.service import Service
         
-        # Install Driver
         driver_path = ChromeDriverManager().install()
         
-        # Linux Path Fix (Koyeb specific)
+        # Linux Path Fix
         if platform.system() != "Windows":
             if "THIRD_PARTY_NOTICES" in driver_path or os.path.isdir(driver_path):
                 parent_dir = os.path.dirname(driver_path) if "THIRD_PARTY_NOTICES" in driver_path else driver_path
@@ -1342,14 +1354,15 @@ def open_whatsapp(headless=True, session_id="default"):
         service = Service(executable_path=driver_path)
         driver = webdriver.Chrome(service=service, options=options)
         
-        # Set a long page load timeout for slow networks
+        # Set generous timeouts for slow CPUs
         driver.set_page_load_timeout(120)
+        driver.set_script_timeout(120)
         
         print("📱 Navigating to WhatsApp Web...")
         driver.get("https://web.whatsapp.com")
         return driver
     except Exception as e:
-        print(f"❌ Chrome Crash: {e}")
+        print(f"❌ Chrome Error: {e}")
         return None
     
 

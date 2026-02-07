@@ -27,22 +27,27 @@ def upload_session(session_id="Owner"):
     os.remove(f"{session_id}.zip")
     print(f"✅ Session '{session_id}' saved to Cloud.")
 
-def download_session(session_id="Owner"):
-    """Downloads session_id.zip and extracts it to profiles/session_id"""
+def download_session(session_id):
+    """Downloads session_id.zip if it exists."""
     local_dir = f"profiles/{session_id}"
     
+    # If we already have the folder locally, don't re-download (saves bandwidth/time)
+    if os.path.exists(local_dir):
+        print(f"📂 Local profile '{session_id}' found. Using it.")
+        return True
+
+    print(f"📥 Checking cloud for '{session_id}'...")
     try:
         res = supabase.storage.from_(BUCKET_NAME).download(f"{session_id}.zip")
         with open("restore.zip", "wb") as f:
             f.write(res)
         
-        if os.path.exists(local_dir):
-            shutil.rmtree(local_dir)
-            
         shutil.unpack_archive("restore.zip", local_dir)
         os.remove("restore.zip")
         return True
-    except:
+    except Exception:
+        # Silent fail is better here. It just means "New User"
+        print(f"ℹ️ New session '{session_id}' will be created.")
         return False
     
 def list_available_sessions():
