@@ -35,7 +35,7 @@ SYSTEM_PROMPT = """
 # ==============================================================================
 # --- SCHEDULER TIMINGS (in seconds) ---
 # ==============================================================================
-SYNC_INTERVAL_SECONDS = 60
-REPLY_INTERVAL_SECONDS = 180
+SYNC_INTERVAL_SECONDS = 300
+REPLY_INTERVAL_SECONDS = 600
 REPLY_API_TASK_DELAY_SECONDS = 30
 REPLY_MAX_AGE_DAYS = 30

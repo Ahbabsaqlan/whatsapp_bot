@@ -198,46 +198,53 @@ def login_page():
     # Make sure you create a folder named 'templates' with login.html inside
     return render_template('login.html')
 
+# api_routes.py
+
 @app.route('/get-qr')
 def get_qr():
     global login_driver
+    task_lock = current_app.config.get('TASK_LOCK')
+    
+    # ACQUIRE LOCK: Don't start QR if Sync Task is running
+    acquired = task_lock.acquire(blocking=False)
+    if not acquired:
+        return jsonify({"status": "error", "message": "System busy syncing messages. Try again in 1 minute."}), 503
+
     try:
-        # If a driver is already running, kill it to start fresh
         if login_driver:
             try: login_driver.quit()
             except: pass
         
-        print("🌐 Launching browser for QR...")
         login_driver = sh.open_whatsapp(headless=True)
-        
         qr_data = sh.get_qr_base64(login_driver)
+        
         if qr_data:
             return jsonify({"status": "success", "qr": qr_data})
-        
-        return jsonify({"status": "error", "message": "QR not found on page"}), 404
-    except Exception as e:
-        return jsonify({"status": "error", "message": str(e)}), 500
-
-# api_routes.py
+        return jsonify({"status": "error", "message": "QR generation failed"}), 404
+    finally:
+        # We DON'T release the lock here because we need the driver to stay 
+        # alive for the user to scan. We release it in /check-auth or if error.
+        if not qr_data: task_lock.release()
 
 @app.route('/check-auth')
 def check_auth():
     global login_driver
-    if not login_driver: return jsonify({"status": "idle"})
+    task_lock = current_app.config.get('TASK_LOCK')
     
-    # Wait for the main "pane-side" (chat list) to appear. 
-    # This proves the login is fully complete.
+    if not login_driver: 
+        return jsonify({"status": "idle"})
+    
     is_fully_loaded = sh.get_element(login_driver, "login_check", timeout=1, suppress_error=True)
     
     if is_fully_loaded:
-        print("🔥 Login detected! Waiting for session to stabilize...")
-        time.sleep(5) # Give it 5 seconds to write session files to disk
-        
+        time.sleep(5)
         from storage_manager import upload_session
         upload_session() 
-        
         login_driver.quit()
         login_driver = None
+        
+        # RELEASE LOCK: Allow Sync Task to resume
+        if task_lock.locked(): task_lock.release()
         return jsonify({"status": "authenticated"})
     
     return jsonify({"status": "waiting"})

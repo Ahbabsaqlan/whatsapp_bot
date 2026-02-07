@@ -1289,62 +1289,50 @@ from PIL import Image
 # selenium_handler.py
 
 def open_whatsapp(headless=True):
-    """
-    Opens WhatsApp Web with a fix for the Linux 'Exec format error'.
-    """
-    import platform
-    import os
+    import os, platform, subprocess
     from selenium.webdriver.chrome.service import Service
     from webdriver_manager.chrome import ChromeDriverManager
-    
-    # 1. Restore session from Supabase
     from storage_manager import download_session
+
+    # 1. KILL DANGLING PROCESSES (Crucial for 512MB RAM)
+    if platform.system() != "Windows":
+        try:
+            subprocess.run(["pkill", "-9", "chrome"], stderr=subprocess.DEVNULL)
+            subprocess.run(["pkill", "-9", "chromedriver"], stderr=subprocess.DEVNULL)
+        except: pass
+
     download_session()
 
     options = Options()
     if headless:
         options.add_argument("--headless=new")
     
-    # Critical flags for Koyeb/Docker
+    # --- ULTRA LOW RAM SETTINGS ---
     options.add_argument("--no-sandbox")
-    options.add_argument("--disable-dev-shm-usage")
+    options.add_argument("--disable-dev-shm-usage") # Uses disk instead of RAM for temp files
     options.add_argument("--disable-gpu")
-    options.add_argument("--remote-allow-origins=*")
-    options.add_argument("--window-size=1920,1080")
+    options.add_argument("--disable-extensions")
+    options.add_argument("--window-size=1280,720") # Smaller window = less RAM
+    options.add_argument("--js-flags='--max-old-space-size=256'") # Cap Javascript RAM
     
-    # Set the profile path
-    session_dir = os.path.abspath("whatsapp_automation_profile")
-    options.add_argument(f"--user-data-dir={session_dir}")
+    options.add_argument(f"--user-data-dir={os.path.abspath('whatsapp_automation_profile')}")
 
     try:
         print("🌐 Resolving ChromeDriver...")
-        # Get the path from manager
         driver_path = ChromeDriverManager().install()
         
-        # --- FIX FOR LINUX EXEC FORMAT ERROR ---
+        # Bulletproof Fix for the Linux "Exec format error"
         if platform.system() != "Windows":
-            # If it points to the license file, point it to the binary instead
-            if "THIRD_PARTY_NOTICES" in driver_path:
-                driver_path = os.path.join(os.path.dirname(driver_path), "chromedriver")
-            
-            # If it points to a directory, look for the binary inside
-            elif os.path.isdir(driver_path):
-                driver_path = os.path.join(driver_path, "chromedriver")
-            
-            # Ensure the file is actually executable by the system
+            if "THIRD_PARTY_NOTICES" in driver_path or os.path.isdir(driver_path):
+                parent_dir = os.path.dirname(driver_path) if "THIRD_PARTY_NOTICES" in driver_path else driver_path
+                driver_path = os.path.join(parent_dir, "chromedriver")
             os.chmod(driver_path, 0o755)
-        # ----------------------------------------
 
-        print(f"📂 Driver verified at: {driver_path}")
+        print(f"📂 Launching: {driver_path}")
         service = Service(executable_path=driver_path)
-        driver = webdriver.Chrome(service=service, options=options)
-        
-        print("📱 Navigating to WhatsApp Web...")
-        driver.get("https://web.whatsapp.com")
-        return driver
-
+        return webdriver.Chrome(service=service, options=options)
     except Exception as e:
-        print(f"\n❌ Failed to launch Chrome: {e}")
+        print(f"❌ Chrome Crash: {e}")
         return None
 
 def get_qr_base64(driver):

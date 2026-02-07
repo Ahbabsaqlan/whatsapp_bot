@@ -127,9 +127,7 @@ def run_sync_task():
             print(f"\n   ❌ An error occurred during sync task: {e}")
         finally:
             if driver:
-                print("   Closing sync browser to release profile lock.")
-                driver.quit()
-            print("   Releasing lock.")
+                driver.quit() # This MUST run to free up RAM for the next task
 
 def run_parallel_tasks(only_sync=False):
     """
