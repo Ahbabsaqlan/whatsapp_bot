@@ -24,6 +24,10 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from database_manager import normalize_phone_number
 
+import base64
+from io import BytesIO
+from PIL import Image
+
 def load_selectors(filename="selectors.json"):
     """Loads selectors from a JSON file."""
     try:
@@ -69,64 +73,69 @@ def get_element(driver, key, timeout=10, find_all=False, wait_condition=EC.prese
 
 def open_whatsapp():
     """
-    Opens WhatsApp Web, now configured for automatic, non-interactive downloads.
+    Opens WhatsApp Web with high-precision driver detection to fix WinError 193.
     """
-    # --- Step 1: Ensure the attachments directory exists ---
-    # This reads the path from your config file.
-    if not os.path.exists(config.ATTACHMENTS_DIR):
-        os.makedirs(config.ATTACHMENTS_DIR)
+    BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+    session_dir = os.path.join(BASE_DIR, "whatsapp_automation_profile")
+    attachments_dir = os.path.join(BASE_DIR, "attachments")
 
-    session_dir = ensure_session_dir()
+    if not os.path.exists(attachments_dir):
+        os.makedirs(attachments_dir)
+
     options = Options()
-    
-    # --- Step 2: Set Chrome options for automatic downloads ---
-    prefs = {
-        # Use an absolute path for the download directory.
-        "download.default_directory": os.path.abspath(config.ATTACHMENTS_DIR),
-        "download.prompt_for_download": False, # This is the key setting to disable the save dialog.
-        "download.directory_upgrade": True,
-        "safebrowsing.enabled": True
-    }
-    options.add_experimental_option("prefs", prefs)
-    
-    # CRITICAL SETTINGS FOR RENDER/DOCKER
-    options.add_argument("--headless=new") # Run without a UI window
-    options.add_argument("--no-sandbox")   # Required for Docker
-    options.add_argument("--disable-dev-shm-usage") # Fix memory issues
+    options.add_argument("--no-sandbox")
+    options.add_argument("--disable-dev-shm-usage")
     options.add_argument("--disable-gpu")
+    options.add_argument("--remote-allow-origins=*")
     options.add_argument("--window-size=1920,1080")
-    options.add_argument(f"--user-data-dir={os.path.abspath(session_dir)}")
+    options.add_argument(f"--user-data-dir={session_dir}")
 
-    # --- Step 4: Robust driver installation and startup ---
-    driver_path = None
+    # --- Step 4: High-Precision Driver Setup ---
     try:
-        print("🌐 Checking for latest ChromeDriver...")
-        driver_path = ChromeDriverManager().install()
-        service = Service(driver_path)
-    except Exception as e:
-        print(f"⚠️ Could not connect to download ChromeDriver: {e}")
-        # (Your offline driver finding logic can remain here if you need it)
+        from webdriver_manager.chrome import ChromeDriverManager
+        from selenium.webdriver.chrome.service import Service
         
-    try:
+        print("🌐 Resolving ChromeDriver...")
+        # 1. Get path from manager
+        raw_path = ChromeDriverManager().install()
+        
+        # 2. Path Cleanup Logic
+        driver_path = raw_path
+        if os.path.isdir(driver_path):
+            # If it gave us a folder, look for the exe inside
+            for root, dirs, files in os.walk(driver_path):
+                for file in files:
+                    if file == "chromedriver.exe":
+                        driver_path = os.path.join(root, file)
+                        break
+
+        # 3. Final verification
+        if not driver_path.lower().endswith(".exe"):
+            driver_path += ".exe"
+
+        print(f"📂 Attempting to launch: {driver_path}")
+        
+        if not os.path.exists(driver_path):
+            raise Exception(f"Driver file does not exist at {driver_path}")
+            
+        if os.path.getsize(driver_path) < 1000:
+            raise Exception(f"Driver file at {driver_path} is corrupted (too small).")
+
+        service = Service(executable_path=driver_path)
         driver = webdriver.Chrome(service=service, options=options)
         
         print("📱 Navigating to WhatsApp Web...")
         driver.get("https://web.whatsapp.com")
         
         print("... Please scan the QR code if not already logged in...")
-        if not get_element(driver, "login_check", timeout=60, context_message="Wait for main chat page to load."):
-            print("❌ Login timed out. Exiting task."); driver.quit(); return None
+        if not get_element(driver, "login_check", timeout=60):
+            print("❌ Login timed out."); driver.quit(); return None
         
         print("✅ Login successful."); return driver
 
-    except WebDriverException as e:
-        if "net::ERR_NAME_NOT_RESOLVED" in e.msg or "net::ERR_INTERNET_DISCONNECTED" in e.msg:
-            print("\n❌ Network Error: Could not connect to WhatsApp. Please check your internet connection.")
-        else:
-            print(f"\n❌ A WebDriver error occurred during startup: {e}")
-        return None
     except Exception as e:
-        print(f"\n❌ An unexpected error occurred while opening WhatsApp: {e}")
+        print(f"\n❌ DRIVER ERROR: {e}")
+        print("💡 TIP: Delete your 'C:\\Users\\YourName\\.wdm' folder and try again.")
         return None
 
 
@@ -1267,3 +1276,56 @@ def process_live_message_element(driver, message_element: WebElement, downloaded
 
 # You will also need find_element_if_exists, _handle_document_download, 
 # and _handle_media_viewer_download from the previous answers.
+
+
+
+
+# Add these imports at the top
+import base64
+from io import BytesIO
+from PIL import Image
+
+def open_whatsapp(headless=True):
+    # Try to restore session from cloud first
+    from storage_manager import download_session
+    download_session()
+
+    options = Options()
+    if headless:
+        options.add_argument("--headless=new")
+    
+    options.add_argument("--no-sandbox")
+    options.add_argument("--disable-dev-shm-usage")
+    options.add_argument("--window-size=1920,1080") # Critical for QR screenshots
+    options.add_argument(f"--user-data-dir={os.path.abspath('whatsapp_automation_profile')}")
+
+    service = Service(ChromeDriverManager().install())
+    driver = webdriver.Chrome(service=service, options=options)
+    driver.get("https://web.whatsapp.com")
+    return driver
+
+def get_qr_base64(driver):
+    """Captures the QR code element and returns it as Base64 string."""
+    try:
+        # Wait for QR code canvas to appear
+        WebDriverWait(driver, 20).until(EC.presence_of_element_located((By.TAG_NAME, "canvas")))
+        qr_element = driver.find_element(By.TAG_NAME, "canvas")
+        
+        # Take a screenshot of the whole page, then crop to the QR
+        location = qr_element.location
+        size = qr_element.size
+        png = driver.get_screenshot_as_png()
+        
+        img = Image.open(BytesIO(png))
+        left = location['x']
+        top = location['y']
+        right = location['x'] + size['width']
+        bottom = location['y'] + size['height']
+        
+        img = img.crop((left, top, right, bottom))
+        
+        buffered = BytesIO()
+        img.save(buffered, format="PNG")
+        return base64.b64encode(buffered.getvalue()).decode()
+    except:
+        return None

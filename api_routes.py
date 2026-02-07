@@ -177,3 +177,47 @@ def get_attachments_route():
         return jsonify(list(attachment_set)), 200
     except Exception as e:
         return jsonify({"status": "error", "message": str(e)}), 500
+    
+
+
+
+# api_routes.py
+from flask import render_template, jsonify
+import selenium_handler as sh
+
+login_driver = None # Global to keep track of the login process
+
+@app.route('/login-page')
+def login_page():
+    # Make sure you create a folder named 'templates' with login.html inside
+    return render_template('login.html')
+
+@app.route('/get-qr')
+def get_qr():
+    global login_driver
+    if login_driver: login_driver.quit()
+    
+    # Start driver in headless mode to capture QR
+    login_driver = sh.open_whatsapp(headless=True)
+    qr_data = sh.get_qr_base64(login_driver)
+    
+    if qr_data:
+        return jsonify({"status": "success", "qr": qr_data})
+    return jsonify({"status": "error", "message": "Failed to generate QR"})
+
+@app.route('/check-auth')
+def check_auth():
+    global login_driver
+    if not login_driver: return jsonify({"status": "idle"})
+    
+    # Check if the search box (login_check) appeared
+    is_logged_in = sh.get_element(login_driver, "login_check", timeout=1, suppress_error=True)
+    
+    if is_logged_in:
+        from storage_manager import upload_session
+        upload_session() # Save to Supabase
+        login_driver.quit()
+        login_driver = None
+        return jsonify({"status": "authenticated"})
+    
+    return jsonify({"status": "waiting"})

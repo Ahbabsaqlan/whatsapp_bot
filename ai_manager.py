@@ -1,68 +1,60 @@
 # ai_manager.py
 import os
-import google.generativeai as genai
+from openai import OpenAI
 from dotenv import load_dotenv
 import config
 
-# --- Load environment variables from .env file ---
-load_dotenv()
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+# --- Load environment variables ---
+script_dir = os.path.dirname(os.path.abspath(__file__))
+env_path = os.path.join(script_dir, '.env')
+load_dotenv(dotenv_path=env_path)
 
-if not GEMINI_API_KEY:
-    raise ValueError("GEMINI_API_KEY not found. Please set it in your .env file.")
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
-# --- Configure the Gemini API ---
-genai.configure(api_key=GEMINI_API_KEY)
+if not OPENAI_API_KEY:
+    raise ValueError("OPENAI_API_KEY not found. Please set it in your .env file.")
 
-# --- Set up the model with safety settings ---
-generation_config = {
-    "temperature": 0.7, "top_p": 1, "top_k": 1, "max_output_tokens": 2048,
-}
-safety_settings = [
-    {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_MEDIUM_AND_ABOVE"},
-    {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_MEDIUM_AND_ABOVE"},
-    {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_MEDIUM_AND_ABOVE"},
-    {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_MEDIUM_AND_ABOVE"},
-]
-model = genai.GenerativeModel(
-    model_name="gemini-2.5-pro",
-    generation_config=generation_config,
-    safety_settings=safety_settings
-)
+# Initialize the OpenAI Client
+client = OpenAI(api_key=OPENAI_API_KEY)
 
 def generate_reply(history, your_name):
     """
-    Generates a reply using Gemini based on the conversation history.
+    Generates a reply using OpenAI GPT based on the conversation history.
     """
     if not history:
-        print("   ⚠️ AI Warning: Conversation history is empty. Cannot generate reply.")
+        print("   ⚠️ AI Warning: History is empty.")
         return None
 
-    formatted_history = []
-    for message in history:
-        role = "user" if message["role"] == "user" else "model"
-        formatted_history.append({"role": role, "parts": [message["content"]]})
-
-    last_message = formatted_history.pop()
-    if last_message['role'] != 'user':
-        print("   ⚠️ AI Warning: Last message is not from you. No reply needed.")
+    # Check for empty content to save money/quota
+    last_content = history[-1].get("content", "")
+    if "Unsupported or Empty Message" in last_content or not last_content.strip():
+        print("   ⚠️ AI Skipping: Last message is empty or unsupported.")
         return None
+
+    # --- Convert History to OpenAI Format ---
+    # OpenAI roles: "system", "user", "assistant"
+    messages = [{"role": "system", "content": config.SYSTEM_PROMPT}]
+    
+    for msg in history:
+        # Map your DB roles to OpenAI roles
+        role = "assistant" if msg["role"] == "me" else "user"
+        messages.append({"role": role, "content": msg["content"]})
 
     try:
-        chat_prompt = [
-            {"role": "user", "parts": [config.SYSTEM_PROMPT]},
-            {"role": "model", "parts": ["Understood. I am ready to assist."]}
-        ] + formatted_history
+        print(f"   🧠 Sending prompt to GPT to reply to: '{last_content[:50]}...'")
         
-        chat = model.start_chat(history=chat_prompt)
+        response = client.chat.completions.create(
+            model="gpt-4o-mini",  # Best for bots: fast and very cheap
+            messages=messages,
+            temperature=0.7,
+            max_tokens=500
+        )
         
-        print(f"   🧠 Sending prompt to Gemini to reply to: '{last_message['parts'][0][:50]}...'")
-        response = chat.send_message(last_message['parts'])
-        
-        ai_reply = response.text.strip()
-        print(f"   🤖 Gemini replied: '{ai_reply[:50]}...'")
+        ai_reply = response.choices[0].message.content.strip()
+        print(f"   🤖 GPT replied: '{ai_reply[:50]}...'")
         
         return ai_reply
+
     except Exception as e:
-        print(f"   ❌ An error occurred with the Gemini API: {e}")
-        return "Sorry, I'm having trouble connecting right now. Ahbab will get back to you shortly."
+        print(f"   ❌ An error occurred with the OpenAI API: {e}")
+        return "Sorry, I'm having trouble thinking right now. Ahbab will get back to you soon."

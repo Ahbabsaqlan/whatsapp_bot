@@ -25,7 +25,8 @@ def run_api_server(whatsapp_name, lock):
     import logging
     log = logging.getLogger('werkzeug')
     log.setLevel(logging.ERROR)
-    app.run(port=5001)
+    # Koyeb needs host 0.0.0.0 to allow external access
+    app.run(host='0.0.0.0', port=8000)
 
 # --- THIS IS THE FINAL AI-POWERED VERSION ---
 def process_unreplied_queue():

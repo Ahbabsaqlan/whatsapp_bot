@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>WhatsApp Bot Login</title>
+    <style>
+        body { font-family: sans-serif; text-align: center; padding-top: 50px; }
+        #qr-container img { border: 10px solid white; box-shadow: 0 0 10px rgba(0,0,0,0.1); }
+        .hidden { display: none; }
+    </style>
+</head>
+<body>
+    <h1>Connect your WhatsApp</h1>
+    <button id="start-btn">Generate QR Code</button>
+    
+    <div id="qr-container" class="hidden">
+        <p>Scan this with your WhatsApp Linked Devices:</p>
+        <img id="qr-img" src="" alt="QR Code">
+        <p id="status">Waiting for scan...</p>
+    </div>
+
+    <script>
+        const startBtn = document.getElementById('start-btn');
+        const qrContainer = document.getElementById('qr-container');
+        const qrImg = document.getElementById('qr-img');
+        const statusText = document.getElementById('status');
+
+        startBtn.onclick = async () => {
+            startBtn.classList.add('hidden');
+            qrContainer.classList.remove('hidden');
+            
+            const resp = await fetch('/get-qr');
+            const data = await resp.json();
+            
+            if(data.qr) {
+                qrImg.src = "data:image/png;base64," + data.qr;
+                startPolling();
+            }
+        };
+
+        function startPolling() {
+            const interval = setInterval(async () => {
+                const resp = await fetch('/check-auth');
+                const data = await resp.json();
+                
+                if(data.status === 'authenticated') {
+                    statusText.innerText = "✅ Successfully Connected! You can close this tab.";
+                    clearInterval(interval);
+                }
+            }, 3000);
+        }
+    </script>
+</body>
+</html>
