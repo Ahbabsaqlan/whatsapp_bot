@@ -1286,8 +1286,18 @@ import base64
 from io import BytesIO
 from PIL import Image
 
+# selenium_handler.py
+
 def open_whatsapp(headless=True):
-    # Try to restore session from cloud first
+    """
+    Opens WhatsApp Web with a fix for the Linux 'Exec format error'.
+    """
+    import platform
+    import os
+    from selenium.webdriver.chrome.service import Service
+    from webdriver_manager.chrome import ChromeDriverManager
+    
+    # 1. Restore session from Supabase
     from storage_manager import download_session
     download_session()
 
@@ -1295,16 +1305,47 @@ def open_whatsapp(headless=True):
     if headless:
         options.add_argument("--headless=new")
     
+    # Critical flags for Koyeb/Docker
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
-    options.add_argument("--window-size=1920,1080") # Critical for QR screenshots
-    options.add_argument("--force-device-scale-factor=1")
-    options.add_argument(f"--user-data-dir={os.path.abspath('whatsapp_automation_profile')}")
+    options.add_argument("--disable-gpu")
+    options.add_argument("--remote-allow-origins=*")
+    options.add_argument("--window-size=1920,1080")
+    
+    # Set the profile path
+    session_dir = os.path.abspath("whatsapp_automation_profile")
+    options.add_argument(f"--user-data-dir={session_dir}")
 
-    service = Service(ChromeDriverManager().install())
-    driver = webdriver.Chrome(service=service, options=options)
-    driver.get("https://web.whatsapp.com")
-    return driver
+    try:
+        print("🌐 Resolving ChromeDriver...")
+        # Get the path from manager
+        driver_path = ChromeDriverManager().install()
+        
+        # --- FIX FOR LINUX EXEC FORMAT ERROR ---
+        if platform.system() != "Windows":
+            # If it points to the license file, point it to the binary instead
+            if "THIRD_PARTY_NOTICES" in driver_path:
+                driver_path = os.path.join(os.path.dirname(driver_path), "chromedriver")
+            
+            # If it points to a directory, look for the binary inside
+            elif os.path.isdir(driver_path):
+                driver_path = os.path.join(driver_path, "chromedriver")
+            
+            # Ensure the file is actually executable by the system
+            os.chmod(driver_path, 0o755)
+        # ----------------------------------------
+
+        print(f"📂 Driver verified at: {driver_path}")
+        service = Service(executable_path=driver_path)
+        driver = webdriver.Chrome(service=service, options=options)
+        
+        print("📱 Navigating to WhatsApp Web...")
+        driver.get("https://web.whatsapp.com")
+        return driver
+
+    except Exception as e:
+        print(f"\n❌ Failed to launch Chrome: {e}")
+        return None
 
 def get_qr_base64(driver):
     """Captures the QR code element and returns it as Base64 string."""

@@ -11,3 +11,4 @@ Pillow==10.2.0
 openai==1.12.0
 google-generativeai==0.3.2
 pyperclip==1.8.2
+webdriver-manager==4.0.2
