@@ -1,75 +1,57 @@
-# storage_manager.py
 import os
 import shutil
 from supabase import create_client, ClientOptions
 
-# --- Load Environment Variables ---
 url = os.getenv("SUPABASE_URL")
 key = os.getenv("SUPABASE_KEY")
+supabase = create_client(url, key, options=ClientOptions(postgrest_client_timeout=10, storage_client_timeout=60))
 
-# --- Constants ---
 BUCKET_NAME = "whatsapp_data"
-ZIP_NAME = "whatsapp_profile" # shutil adds .zip
-REMOTE_FILE = "whatsapp_profile.zip"
-LOCAL_DIR = "whatsapp_automation_profile"
 
-# --- Initialize Supabase with Fix for Proxy Error ---
-if not url or not key:
-    print("❌ ERROR: Supabase Credentials Missing in Environment Variables")
-    supabase = None
-else:
-    # ClientOptions fix for the 'proxy' TypeError
-    supabase = create_client(
-        url, 
-        key,
-        options=ClientOptions(
-            postgrest_client_timeout=10,
-            storage_client_timeout=10
+def upload_session(session_id):
+    """Zips a SPECIFIC session folder and uploads it as session_id.zip"""
+    local_dir = f"profiles/{session_id}" # e.g., profiles/user123
+    
+    if not os.path.exists(local_dir):
+        return False
+
+    # Zip profiles/user123 -> user123.zip
+    shutil.make_archive(session_id, 'zip', local_dir)
+    
+    with open(f"{session_id}.zip", "rb") as f:
+        supabase.storage.from_(BUCKET_NAME).upload(
+            path=f"{session_id}.zip", 
+            file=f, 
+            file_options={"cache-control": "3600", "upsert": "true"}
         )
-    )
+    os.remove(f"{session_id}.zip")
+    print(f"✅ Session '{session_id}' saved to Cloud.")
 
-def upload_session():
-    """Zips the local session and uploads it to Supabase Storage."""
-    if not supabase: return
-    if not os.path.exists(LOCAL_DIR):
-        print("⚠️ No local profile found to upload.")
-        return
-
+def download_session(session_id):
+    """Downloads session_id.zip and extracts it to profiles/session_id"""
+    local_dir = f"profiles/{session_id}"
+    
     try:
-        print("📦 Zipping WhatsApp session...")
-        shutil.make_archive(ZIP_NAME, 'zip', LOCAL_DIR)
-        
-        with open(f"{ZIP_NAME}.zip", "rb") as f:
-            print("📤 Uploading session to Supabase Storage...")
-            supabase.storage.from_(BUCKET_NAME).upload(
-                path=REMOTE_FILE, 
-                file=f, 
-                file_options={"cache-control": "3600", "upsert": "true"}
-            )
-        os.remove(f"{ZIP_NAME}.zip")
-        print("✅ Session backed up to cloud.")
-    except Exception as e:
-        print(f"❌ Failed to upload session: {e}")
-
-def download_session():
-    """Downloads the session from Supabase and unzips it locally."""
-    if not supabase: return False
-    print("📥 Checking for cloud session backup...")
-    try:
-        # Check if bucket/file exists by attempting download
-        res = supabase.storage.from_(BUCKET_NAME).download(REMOTE_FILE)
-        
+        res = supabase.storage.from_(BUCKET_NAME).download(f"{session_id}.zip")
         with open("restore.zip", "wb") as f:
             f.write(res)
         
-        if os.path.exists(LOCAL_DIR):
-            shutil.rmtree(LOCAL_DIR)
+        if os.path.exists(local_dir):
+            shutil.rmtree(local_dir)
             
-        print("📂 Unzipping cloud session...")
-        shutil.unpack_archive("restore.zip", LOCAL_DIR)
+        shutil.unpack_archive("restore.zip", local_dir)
         os.remove("restore.zip")
-        print("✅ Session restored from cloud.")
         return True
-    except Exception as e:
-        print(f"ℹ️ Could not restore session (this is normal if first run): {e}")
+    except:
         return False
+    
+def list_available_sessions():
+    """Returns a list of .zip files in the bucket."""
+    try:
+        # Supabase storage list API
+        files = supabase.storage.from_(BUCKET_NAME).list()
+        # Filter only zip files
+        return [f['name'] for f in files if f['name'].endswith('.zip')]
+    except Exception as e:
+        print(f"Error listing sessions: {e}")
+        return []

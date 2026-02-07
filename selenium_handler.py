@@ -1308,7 +1308,7 @@ def get_qr_base64(driver):
         print(f"❌ QR Extraction failed: {e}")
         return None
 
-def open_whatsapp(headless=True):
+def open_whatsapp(headless=True, session_id="default"):
     options = Options()
     if headless:
         options.add_argument("--headless=new")
@@ -1321,8 +1321,9 @@ def open_whatsapp(headless=True):
     options.add_argument("--window-size=1024,768")
     
     # Path setup
-    session_dir = os.path.abspath("whatsapp_automation_profile")
-    options.add_argument(f"--user-data-dir={session_dir}")
+    base_path = os.getcwd()
+    profile_path = os.path.join(base_path, "profiles", session_id)
+    options.add_argument(f"--user-data-dir={profile_path}")
 
     try:
         from webdriver_manager.chrome import ChromeDriverManager

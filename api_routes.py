@@ -187,11 +187,18 @@ def get_attachments_route():
 
 
 
-from flask import Flask, jsonify, render_template
+# api_routes.py
+import os
 import threading
-import selenium_handler as sh
-import bot_state # Import our new state manager
 import time
+from flask import Flask, request, jsonify, render_template, current_app
+import selenium_handler as sh
+import bot_state # Requires bot_state.py (dictionary + lock)
+import storage_manager
+
+# Ensure template folder is correct for Docker
+template_dir = os.path.abspath('templates')
+app = Flask(__name__, template_folder=template_dir)
 
 @app.route('/login-page')
 def login_page():
@@ -199,49 +206,76 @@ def login_page():
 
 @app.route('/trigger-qr')
 def trigger_qr():
-    """Starts the browser in a background thread."""
-    if bot_state.state["status"] == "LOGIN_MODE":
-        return jsonify({"status": "processing", "message": "Browser already starting..."})
+    """
+    Starts Chrome in a background thread to avoid HTTP 408 Timeout.
+    Accepts ?session_id=User123
+    """
+    session_id = request.args.get('session_id')
+    if not session_id:
+        return jsonify({"status": "error", "message": "Session ID is required"}), 400
 
-    def background_browser_launch():
-        with bot_state.BROWSER_LOCK:
+    # 1. Check if system is busy
+    if bot_state.state["status"] == "LOGIN_MODE":
+        return jsonify({"status": "busy", "message": "Another login is in progress. Please wait."})
+
+    # 2. Define the background task
+    def background_browser_launch(user_id):
+        # Try to acquire lock (Wait up to 10s if a Sync is finishing)
+        acquired = bot_state.BROWSER_LOCK.acquire(timeout=10)
+        if not acquired:
+            bot_state.state["status"] = "ERROR_BUSY"
+            return
+
+        try:
+            print(f"🚀 Starting Login Flow for: {user_id}")
             bot_state.state["status"] = "LOGIN_MODE"
+            bot_state.state["current_user"] = user_id
             bot_state.state["qr_code"] = None
             
-            # Close existing driver if any
+            # Clean up old drivers if any
             if bot_state.state["driver"]:
                 try: bot_state.state["driver"].quit()
                 except: pass
+
+            # Open Chrome with specific profile folder
+            driver = sh.open_whatsapp(headless=True, session_id=user_id)
             
-            # Open new driver
-            driver = sh.open_whatsapp(headless=True)
             if driver:
                 bot_state.state["driver"] = driver
-                # Attempt to get QR
+                # Attempt to get QR (This waits patiently)
                 qr = sh.get_qr_base64(driver)
                 if qr:
                     bot_state.state["qr_code"] = qr
+                    print("✅ QR Code captured and ready for frontend.")
                 else:
                     bot_state.state["status"] = "ERROR_QR"
             else:
                 bot_state.state["status"] = "ERROR_BROWSER"
+                
+        except Exception as e:
+            print(f"❌ Background Launch Error: {e}")
+            bot_state.state["status"] = "ERROR_GENERIC"
+            if bot_state.BROWSER_LOCK.locked():
+                bot_state.BROWSER_LOCK.release()
 
-    # Start thread
-    threading.Thread(target=background_browser_launch).start()
-    return jsonify({"status": "started", "message": "Browser launching in background..."})
+    # 3. Start the thread
+    threading.Thread(target=background_browser_launch, args=(session_id,)).start()
+    return jsonify({"status": "started", "message": "Browser launching..."})
 
 @app.route('/poll-qr')
 def poll_qr():
-    """Frontend calls this every 2 seconds to check progress."""
+    """Frontend calls this repeatedly to check if QR is ready."""
     status = bot_state.state["status"]
     qr = bot_state.state["qr_code"]
     
     if status == "LOGIN_MODE" and qr is None:
-        return jsonify({"status": "loading", "message": "Chrome is starting (Wait 20-40s)..."})
+        return jsonify({"status": "loading", "message": "Chrome is starting on server..."})
     elif status == "LOGIN_MODE" and qr is not None:
         return jsonify({"status": "ready", "qr": qr})
     elif status.startswith("ERROR"):
-        return jsonify({"status": "error", "message": "Failed to load WhatsApp."})
+        # If error, we must ensure lock is released
+        if bot_state.BROWSER_LOCK.locked(): bot_state.BROWSER_LOCK.release()
+        return jsonify({"status": "error", "message": "Server timed out or crashed."})
     elif status == "AUTHENTICATED":
         return jsonify({"status": "authenticated"})
     else:
@@ -249,22 +283,37 @@ def poll_qr():
 
 @app.route('/check-auth')
 def check_auth():
-    """Checks if login was successful."""
-    driver = bot_state.state["driver"]
+    """Checks if the user scanned the QR code."""
+    driver = bot_state.state.get("driver")
     if not driver: return jsonify({"status": "idle"})
     
-    # Check if we are logged in
+    # Check for the chat list pane
     is_logged_in = sh.get_element(driver, "login_check", timeout=1, suppress_error=True)
     
     if is_logged_in:
+        print("🎉 Login Detected! Saving session...")
         bot_state.state["status"] = "AUTHENTICATED"
-        # Save to cloud
-        from storage_manager import upload_session
-        upload_session()
         
-        # Close the login browser so the Sync Task can take over later
+        # Wait for files to write to disk
+        time.sleep(5)
+        
+        # Upload the specific user's zip
+        current_user = bot_state.state.get("current_user")
+        storage_manager.upload_session(current_user)
+        
+        # Clean up
         driver.quit()
         bot_state.state["driver"] = None
-        return jsonify({"status": "authenticated"})
+        bot_state.state["status"] = "IDLE"
         
+        if bot_state.BROWSER_LOCK.locked():
+            bot_state.BROWSER_LOCK.release()
+            
+        return jsonify({"status": "authenticated"})
+    
     return jsonify({"status": "waiting"})
+
+@app.route('/send-message', methods=['POST'])
+def send_message():
+    """API to send messages (Not implemented for Multi-User in this snippet)"""
+    return jsonify({"status": "info", "message": "Use the automated sync loop for replies."})
